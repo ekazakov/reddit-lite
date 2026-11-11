@@ -1,0 +1,23 @@
+---
+- name: Configure web server
+  hosts: web
+  become: true
+  pre_tasks:
+    - name: Make sure that the required variables are set
+      ansible.builtin.assert:
+        that:
+          - domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$')
+          - domain != 'example.com'
+          - server_ip | length > 0
+          - not admin_email.endswith('@example.com')
+        fail_msg: >-
+          Set domain, server_ip, and admin_email in group_vars/all/local.yml.
+          The domain must be a bare name such as example.com, without
+          https:// or a slash. The email must not end in @example.com.
+        quiet: true
+      tags: [always]
+  roles:
+    - { role: base, tags: [base] }
+    - { role: firewall, tags: [firewall] }
+    - { role: nginx, tags: [nginx] }
+    - { role: certbot, tags: [certbot] }

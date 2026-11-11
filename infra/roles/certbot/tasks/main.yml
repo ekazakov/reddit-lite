@@ -1,0 +1,61 @@
+---
+- name: Resolve the domain names from the Mac
+  ansible.builtin.command: "dig +short A {{ item }}"
+  loop: "{{ site_domains }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: certbot_dns
+
+- name: Make sure that DNS points to the server
+  ansible.builtin.assert:
+    that:
+      - server_ip in item.stdout_lines
+    fail_msg: >-
+      DNS for {{ item.item }} returns "{{ item.stdout_lines | join(', ') }}",
+      but the server IP is {{ server_ip }}. Create or fix the A record,
+      wait for DNS to spread, and run this role again.
+    quiet: true
+  loop: "{{ certbot_dns.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Install Certbot
+  ansible.builtin.apt:
+    name: certbot
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Request the certificate
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --webroot -w {{ web_root }}
+      --cert-name {{ domain }}
+      {% for d in site_domains %}-d {{ d }} {% endfor %}
+      -m {{ admin_email }} --agree-tos --non-interactive
+      {{ '--staging' if certbot_staging else '' }}
+    creates: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"
+
+- name: Add the HTTPS block to the virtual host
+  ansible.builtin.include_role:
+    name: nginx
+    tasks_from: vhost
+    apply:
+      tags: [certbot]
+
+- name: Reload Nginx after renewal
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      systemctl reload nginx
+
+- name: Make sure that automatic renewal is enabled
+  ansible.builtin.service:
+    name: certbot.timer
+    state: started
+    enabled: true

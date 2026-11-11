@@ -1,0 +1,8 @@
+---
+# Copy this file to local.yml and fill in your values.
+# local.yml is in .gitignore. Do not commit it.
+
+domain: example.com
+admin_email: you@example.com
+server_ip: "203.0.113.10"
+deploy_user_public_key_file: "~/.ssh/id_ed25519.pub"

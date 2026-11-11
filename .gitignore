@@ -1,3 +1,9 @@
 node_modules
 .env
 *.log
+
+# Ansible
+infra/inventory.ini
+.ansible/
+infra/*.retry
+infra/**/local.yml

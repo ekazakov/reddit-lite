@@ -1,0 +1,43 @@
+---
+- name: Install Nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the web root
+  ansible.builtin.file:
+    path: "{{ web_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+
+- name: Create the placeholder page
+  ansible.builtin.copy:
+    dest: "{{ web_root }}/index.html"
+    owner: www-data
+    group: www-data
+    mode: "0644"
+    force: false
+    content: |
+      <!doctype html>
+      <title>{{ domain }}</title>
+      <h1>{{ domain }}</h1>
+      <p>Nginx works.</p>
+
+- name: Remove the default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Configure the virtual host
+  ansible.builtin.include_tasks: vhost.yml
+
+- name: Make sure that Nginx is enabled and running
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true

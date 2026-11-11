@@ -1,0 +1,10 @@
+# Copy this file to inventory.ini and edit it.
+#
+# Option 1: use a host alias from ~/.ssh/config (HostName, User, and
+# IdentityFile come from that file).
+[web]
+reddit
+
+# Option 2: write everything here (independent of ~/.ssh/config).
+# [web]
+# 203.0.113.10 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519
