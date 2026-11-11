@@ -4,10 +4,11 @@ Package manager: pnpm. Reverse proxy and HTTPS are out of scope for now.
 
 ## Status
 
-- Steps 1 to 9 of the implementation order are written.
-- Verified: `pnpm typecheck` and the unit tests in `test/unit.test.ts`.
-- Not verified: `test/app.test.ts` (needs Postgres), the running server, the browser flow, the Docker build.
-- Blocker: the sandbox blocks local ports, and this machine has no Postgres or Docker daemon. Set `sandbox.network.allowLocalBinding: true`, or start Docker with `docker compose up -d db`.
+- All steps are written and verified.
+- `pnpm typecheck` passes. All 8 tests pass against Postgres 17 in Docker (3 unit, 5 integration).
+- The production image builds, applies migrations on start, and serves `/healthz`.
+- Browser check passed with JavaScript on (nested replies, vote toggle and flip, like toggle, no page reload) and with plain form posts (redirects, escaping, redirect safety).
+- Bugs found and fixed during verification: `onError` turned the CSRF 403 into a 500, `public/app.js` lost the vote value (it read the form data after disabling the buttons), and browsers cached stale static files (now `Cache-Control: no-cache`).
 
 ## Context
 
@@ -150,3 +151,19 @@ Every vote, like, and reply is a normal `<form method="post">`. Without JavaScri
 - In the browser pane: log in, create a post, reply three levels deep, vote, and like. Make sure that the counters update without a reload.
 - Repeat the same flow with JavaScript off. Make sure that every form still works through redirects.
 - Build the production image with `docker build` and make sure that it starts and runs migrations.
+
+## Task list
+
+- [x] 1. Scaffold package, tsconfig, health route
+- [x] 2. Database client, migrations, schema
+- [x] 3. Login, logout, cookie middleware
+- [x] 4. Post list, post page, submit form
+- [x] 5. Comments, tree builder, threaded views
+- [x] 6. Votes and likes with transactions
+- [x] 7. Client JS and CSS
+- [x] 8. Seed script and tests written
+- [x] 9. Dockerfile, compose files, backup script, README
+- [x] 10. Switch project to pnpm
+- [x] 11. Run integration tests against Postgres
+- [x] 12. Smoke test in the browser pane, JavaScript on and off
+- [x] 13. Build and run the Docker image
