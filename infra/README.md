@@ -65,6 +65,44 @@ ssh reddit sudo ufw status
 
 The first command returns HTTP 200. The second returns a 301 redirect to HTTPS.
 
+## Override variables
+
+A variable is a named setting, such as `domain` or `certbot_staging`. The defaults are in `group_vars/all/defaults.yml`. You can change a value in four ways. The list goes from the weakest way to the strongest way. A stronger way wins over a weaker way.
+
+1. `group_vars/all/defaults.yml`: shared defaults for everyone. This file is public. If a new value is right for every user of the repo, change it here and commit it.
+2. `group_vars/all/local.yml`: your own values. The file is in `.gitignore`, so it stays on your Mac. This is the right place for your domain, email, and IP.
+3. `host_vars/<host>.yml`: values for one server only, for example `host_vars/reddit.yml`. If you add a second server with different settings, put its values here. Create the folder yourself.
+4. `-e` on the command line: a value for one run only. It beats every file, and it does not change any file.
+
+Ansible loads the files in `group_vars/all/` in alphabetical order. A file that loads later wins. `defaults.yml` comes before `local.yml`, so `local.yml` wins. If you add a file to that folder, choose a name that sorts in the right place.
+
+To change a value for one run, add `-e`:
+
+```bash
+ansible-playbook site.yml --tags certbot -e certbot_staging=false
+```
+
+To set several values, repeat `-e`:
+
+```bash
+ansible-playbook site.yml -e domain=example.org -e admin_email=me@example.org
+```
+
+To set a list or a file of values, use JSON or `@file`:
+
+```bash
+ansible-playbook site.yml -e '{"site_domains": ["example.org", "www.example.org"]}'
+ansible-playbook site.yml -e @my-values.yml
+```
+
+To see the final value of each variable for a server, before a run:
+
+```bash
+ansible-inventory --host reddit
+```
+
+This command shows the merged values from all files. It does not show values from `-e`.
+
 ## Check the playbook before a run
 
 Run these checks on your Mac. They do not connect to the server.

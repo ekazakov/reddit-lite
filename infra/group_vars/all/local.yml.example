@@ -1,8 +1,17 @@
 ---
 # Copy this file to local.yml and fill in your values.
-# local.yml is in .gitignore. Do not commit it.
+# local.yml is in .gitignore, so your private values stay out of the public
+# repo. Ansible loads it after defaults.yml, so these values win.
+# Add any other variable from defaults.yml here to override it.
 
+# Your domain, as a bare name.
 domain: example.com
+# Your real email address. Let's Encrypt writes to it about expiring certificates.
 admin_email: you@example.com
+# The public IP of your server.
 server_ip: "203.0.113.10"
+# The public key that the base role copies to the sudo user.
 deploy_user_public_key_file: "~/.ssh/id_ed25519.pub"
+
+# Uncomment for a test run (untrusted certificate, high rate limits).
+# certbot_staging: true

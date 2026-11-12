@@ -1,10 +1,19 @@
-# Copy this file to inventory.ini and edit it.
+# The inventory lists the servers that Ansible controls.
+# Copy this file to inventory.ini and edit it. The real inventory.ini is in
+# .gitignore, because it describes how to log in to your own machine.
 #
-# Option 1: use a host alias from ~/.ssh/config (HostName, User, and
-# IdentityFile come from that file).
+# [web] is a group name. site.yml has "hosts: web", so every server in this
+# group gets the playbook.
+
+# Option 1: use a host alias from ~/.ssh/config.
+# Ansible runs the system "ssh" command, so HostName, User, and IdentityFile
+# come from your SSH config. This keeps the IP address out of this file.
 [web]
 reddit
 
-# Option 2: write everything here (independent of ~/.ssh/config).
+# Option 2: write everything here. Use it if you do not want to depend on
+# ~/.ssh/config, for example in a CI job.
+#   ansible_user                  the account to log in with (root on the first run)
+#   ansible_ssh_private_key_file  the private key that matches the key in Kamatera
 # [web]
 # 203.0.113.10 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519

@@ -1,12 +1,27 @@
 ---
+# Role "certbot": gets a free Let's Encrypt certificate and keeps it renewed.
+# Certbot works in "webroot" mode: it puts a check file into web_root, and
+# Let's Encrypt downloads it from port 80 to confirm that you control the domain.
+# Certbot does not edit the Nginx files. The nginx role writes the HTTPS
+# block from its template (see roles/nginx/tasks/vhost.yml).
+
+# Ask DNS on your Mac, not on the server, to see what the world sees.
+# A wrong or missing A record is the most common reason for a failed request.
 - name: Resolve the domain names from the Mac
   ansible.builtin.command: "dig +short A {{ item }}"
   loop: "{{ site_domains }}"
+  # Run this task on the machine that runs Ansible, not on the server.
   delegate_to: localhost
+  # The play uses sudo. Your Mac does not need it for dig.
   become: false
+  # dig only reads, so never report "changed".
   changed_when: false
+  # Keep the answers for the next task.
   register: certbot_dns
 
+# Stop with a clear message if DNS does not point to the server. Without this
+# check, Certbot would fail later with a long error, and repeated failed
+# requests count against the Let's Encrypt rate limit.
 - name: Make sure that DNS points to the server
   ansible.builtin.assert:
     that:
@@ -18,8 +33,11 @@
     quiet: true
   loop: "{{ certbot_dns.results }}"
   loop_control:
+    # Print only the domain name in the task output, not the whole result.
     label: "{{ item.item }}"
 
+# Certbot is the official Let's Encrypt client. We do not install the Nginx
+# plugin, because we use webroot mode.
 - name: Install Certbot
   ansible.builtin.apt:
     name: certbot
@@ -27,6 +45,11 @@
     update_cache: true
     cache_valid_time: 3600
 
+# "certonly" gets the certificate and does not change any web server file.
+# "--cert-name" fixes the folder name in /etc/letsencrypt/live/, so the Nginx
+# template can use a known path.
+# "--non-interactive" and "--agree-tos" let it run without questions.
+# "--staging" (test mode) is added only when certbot_staging is true.
 - name: Request the certificate
   ansible.builtin.command:
     cmd: >-
@@ -35,25 +58,36 @@
       {% for d in site_domains %}-d {{ d }} {% endfor %}
       -m {{ admin_email }} --agree-tos --non-interactive
       {{ '--staging' if certbot_staging else '' }}
+    # Skip this task if the certificate file already exists. This makes a
+    # second run safe and protects the rate limit.
     creates: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"
 
+# Now the certificate exists, so run the Nginx tasks again. The template adds
+# the HTTPS block and the redirect.
 - name: Add the HTTPS block to the virtual host
   ansible.builtin.include_role:
     name: nginx
     tasks_from: vhost
+    # A dynamic include does not pass tags to the included tasks by default.
+    # "apply" gives them the certbot tag, so "--tags certbot" runs them.
     apply:
       tags: [certbot]
 
+# Nginx reads the certificate at start and at reload only. After each renewal,
+# Certbot runs the scripts in this folder, so Nginx loads the new certificate.
 - name: Reload Nginx after renewal
   ansible.builtin.copy:
     dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
     owner: root
     group: root
+    # Executable, because Certbot runs it as a program.
     mode: "0755"
     content: |
       #!/bin/sh
       systemctl reload nginx
 
+# The Ubuntu package installs this systemd timer. It runs "certbot renew"
+# twice a day and renews a certificate when fewer than 30 days remain.
 - name: Make sure that automatic renewal is enabled
   ansible.builtin.service:
     name: certbot.timer

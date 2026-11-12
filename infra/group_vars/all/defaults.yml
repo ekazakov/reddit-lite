@@ -5,30 +5,39 @@
 # value in local.yml wins. Do not rename defaults.yml to a name that sorts
 # after local.yml.
 # See local.yml.example.
+#
+# "group_vars/all" means that these values apply to every host in every group.
 
 # Domain name. Its DNS A record must point to the server IP.
 # Use a bare name, for example example.com. Do not add https:// or a slash.
+# Nginx uses it as server_name, and Certbot requests the certificate for it.
 domain: example.com
 
-# Email address for Let's Encrypt expiry notices.
+# Email address for Let's Encrypt. Let's Encrypt writes to it when a
+# certificate is about to expire and renewal has failed.
 admin_email: admin@example.com
 
-# Public IP of the server. The certbot role checks that DNS points to it.
+# Public IP of the server. The certbot role checks that DNS returns this
+# value, so a wrong DNS record fails early and with a clear message.
 server_ip: ""
 
-# Sudo user that the base role creates.
+# Sudo user that the base role creates. After this user works, you can stop
+# using root for SSH.
 deploy_user: deploy
 
-# Public key that is copied to deploy_user. Path is on your Mac.
+# Public key that is copied to deploy_user, so you can log in as that user.
+# The path is on your Mac, because Ansible reads it there.
 deploy_user_public_key_file: "~/.ssh/id_ed25519.pub"
 
 # Set to true for test runs. Staging certificates are not trusted by browsers
 # but they have much higher rate limits than production ones.
 certbot_staging: false
 
-# Names that the certificate and Nginx cover. Add "www.example.com" here if wanted.
+# Names that the certificate and Nginx cover. Add "www.example.com" here if
+# wanted. The DNS A record of each name must point to the server.
 site_domains:
   - "{{ domain }}"
 
 # Folder that Nginx serves, and that Let's Encrypt uses for the HTTP check.
+# The nginx role creates it. The certbot role passes it to Certbot (webroot mode).
 web_root: "/var/www/{{ domain }}/html"

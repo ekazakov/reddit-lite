@@ -1,42 +1,64 @@
+{# Jinja comments, like this one, do not appear in the output file. #}
+{# Variables: site_domains, web_root, domain, and has_cert (set in vhost.yml). #}
+{# has_cert is false before the certificate exists, and true after that. #}
 # Managed by Ansible. Do not edit by hand.
+# Your changes would be lost at the next run. Change the template instead.
+
+# Port 80 (HTTP) block.
 server {
     listen 80;
+    # The same for IPv6.
     listen [::]:80;
+    # Answer requests for these host names.
     server_name {{ site_domains | join(' ') }};
 
-    # Let's Encrypt HTTP check
+    # Let's Encrypt asks for a file at this path to check that we control the
+    # domain. It must stay on HTTP and must not redirect, so it comes before
+    # the redirect rule.
     location /.well-known/acme-challenge/ {
         root {{ web_root }};
     }
 
 {% if has_cert %}
+    # The certificate exists. Send every other request to HTTPS.
     location / {
         return 301 https://$host$request_uri;
     }
 }
 
+# Port 443 (HTTPS) block. It appears only after the certificate exists,
+# because Nginx does not start if the certificate files are missing.
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
     server_name {{ site_domains | join(' ') }};
 
+    # Files created by Certbot. fullchain.pem has the certificate and the
+    # chain, privkey.pem has the secret key. Certbot renews them in place.
     ssl_certificate     /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
+    # Allow only modern TLS versions. Older versions have known weaknesses.
     ssl_protocols       TLSv1.2 TLSv1.3;
+    # Let returning visitors skip the TLS handshake for one day.
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
 
+    # Tell browsers to use HTTPS for this site for one year (in seconds).
+    # Be careful: if you break HTTPS later, browsers will not fall back to HTTP.
     add_header Strict-Transport-Security "max-age=31536000" always;
 
     root {{ web_root }};
     index index.html;
 
     location / {
+        # Serve the file, or the folder index, or answer 404.
         try_files $uri $uri/ =404;
     }
 }
 {% else %}
+    # No certificate yet. Serve the site over HTTP, so the server works
+    # before the first certificate request.
     root {{ web_root }};
     index index.html;
 
