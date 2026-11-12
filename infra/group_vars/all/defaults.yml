@@ -33,6 +33,14 @@ deploy_user_public_key_file: "~/.ssh/id_ed25519.pub"
 # but they have much higher rate limits than production ones.
 certbot_staging: false
 
+# Set to true to replace an existing staging certificate with a real one.
+# If certbot_staging is false and the certificate on the server came from the
+# staging server, the certbot role deletes it and requests a real one.
+# A real certificate is never deleted by this variable, so it is safe to leave
+# it on. Without it, the certificate request is skipped when any certificate
+# already exists.
+certbot_force: false
+
 # Names that the certificate and Nginx cover. Add "www.example.com" here if
 # wanted. The DNS A record of each name must point to the server.
 site_domains:

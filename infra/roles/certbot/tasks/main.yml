@@ -5,6 +5,21 @@
 # Certbot does not edit the Nginx files. The nginx role writes the HTTPS
 # block from its template (see roles/nginx/tasks/vhost.yml).
 
+# Show which Let's Encrypt server this run uses, so a test run is never
+# mistaken for a real one. A staging certificate is not trusted by browsers.
+- name: Show the certificate mode (staging)
+  ansible.builtin.debug:
+    msg:
+      - "certbot_staging is true. The certificate comes from the Let's Encrypt STAGING server. Browsers do not trust it."
+      - "To switch to a real certificate, run: ansible-playbook site.yml --tags certbot -e certbot_staging=false -e certbot_force=true"
+      - "certbot_force=true deletes the existing staging certificate first. Without it, the request is skipped, because a certificate file already exists."
+  when: certbot_staging | bool
+
+- name: Show the certificate mode (production)
+  ansible.builtin.debug:
+    msg: "certbot_staging is false. The certificate comes from the Let's Encrypt PRODUCTION server. Rate limits apply."
+  when: not (certbot_staging | bool)
+
 # Ask DNS on your Mac, not on the server, to see what the world sees.
 # A wrong or missing A record is the most common reason for a failed request.
 - name: Resolve the domain names from the Mac
@@ -45,11 +60,61 @@
     update_cache: true
     cache_valid_time: 3600
 
+# Replace a staging certificate with a real one (only when certbot_force is
+# true and certbot_staging is false). Certbot stores the server it used in
+# the renewal file, so we read the mode of the existing certificate from there.
+- name: Look for the renewal file of an existing certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/renewal/{{ domain }}.conf"
+  register: certbot_renewal_conf
+
+# grep -q prints nothing. Its exit code is 0 if "acme-staging" is in the file
+# (a staging certificate) and 1 if it is not (a real certificate).
+- name: Find out whether the existing certificate is a staging one
+  ansible.builtin.command: grep -q acme-staging /etc/letsencrypt/renewal/{{ domain }}.conf
+  register: certbot_existing_staging
+  # Exit code 1 is a normal answer here, so it is not a failure.
+  failed_when: certbot_existing_staging.rc not in [0, 1]
+  changed_when: false
+  when:
+    - certbot_force | bool
+    - not (certbot_staging | bool)
+    - certbot_renewal_conf.stat.exists
+
+# Delete the staging certificate. Without this, the "creates" check in the
+# request task below would see the old file and skip the request.
+- name: Delete the staging certificate
+  ansible.builtin.command: "certbot delete --cert-name {{ domain }} --non-interactive"
+  # A delete always changes the server, so report "changed" when it runs.
+  changed_when: true
+  when:
+    - certbot_existing_staging.rc is defined
+    - certbot_existing_staging.rc == 0
+
+# The certificate files are gone, so write the HTTP-only Nginx file now. If a
+# later task fails, Nginx still has a valid file that does not point to missing
+# certificate files, and a restart of Nginx works.
+- name: Switch the virtual host back to HTTP only
+  ansible.builtin.include_role:
+    name: nginx
+    tasks_from: vhost
+    apply:
+      tags: [certbot]
+  # Same condition as the delete task above. We do not test whether the
+  # delete task changed something, because ansible-lint then asks for a
+  # handler. A handler would run too late (at the end of the play), and this
+  # step must run before the request.
+  when:
+    - certbot_existing_staging.rc is defined
+    - certbot_existing_staging.rc == 0
+
 # "certonly" gets the certificate and does not change any web server file.
 # "--cert-name" fixes the folder name in /etc/letsencrypt/live/, so the Nginx
 # template can use a known path.
 # "--non-interactive" and "--agree-tos" let it run without questions.
 # "--staging" (test mode) is added only when certbot_staging is true.
+# The "| bool" filter is required. A value from "-e certbot_staging=false"
+# is the text "false", and Jinja treats any non-empty text as true.
 - name: Request the certificate
   ansible.builtin.command:
     cmd: >-
@@ -57,7 +122,7 @@
       --cert-name {{ domain }}
       {% for d in site_domains %}-d {{ d }} {% endfor %}
       -m {{ admin_email }} --agree-tos --non-interactive
-      {{ '--staging' if certbot_staging else '' }}
+      {{ '--staging' if (certbot_staging | bool) else '' }}
     # Skip this task if the certificate file already exists. This makes a
     # second run safe and protects the rate limit.
     creates: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"

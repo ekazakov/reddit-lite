@@ -48,7 +48,17 @@ ansible-playbook site.yml
 
 ## Test the certificate first (optional)
 
-Let's Encrypt limits repeated requests for one domain. To test, set `certbot_staging: true` in `group_vars/all/local.yml` and run the certbot tag. Browsers do not trust staging certificates. To switch to a real certificate, delete the staging one on the server, then set `certbot_staging: false` and run again:
+Let's Encrypt limits repeated requests for one domain. To test, set `certbot_staging: true` in `group_vars/all/local.yml` and run the certbot tag. Browsers do not trust staging certificates. If a certificate already exists, the certificate request is skipped. A staging certificate stays in place until you replace it.
+
+To switch to a real certificate, turn staging off and set `certbot_force`:
+
+```bash
+ansible-playbook site.yml --tags certbot -e certbot_staging=false -e certbot_force=true
+```
+
+With `certbot_force=true` and `certbot_staging=false`, the certbot role checks the certificate on the server. If it came from the staging server, the role does four steps. It deletes the certificate. It writes an HTTP-only Nginx file. It requests the real certificate. It adds the HTTPS block again. A real certificate is never deleted by this variable, so a second run with the same command changes nothing.
+
+To delete a certificate by hand, run this on the server:
 
 ```bash
 ssh reddit sudo certbot delete --cert-name <domain>
