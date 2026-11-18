@@ -1,5 +1,11 @@
+# Skip local packages. The image installs its own with pnpm, and host builds can differ from Alpine.
 node_modules
+# Skip git history. The image does not need it, and it makes the build context large.
 .git
-.env
+# Skip every .env file at any depth (root, deploy/, loadtest/), so secrets never reach the build context.
+# "**/" matches zero or more folders, so this line covers the root .env too.
+**/.env
+# Skip tests. The production image does not run them.
 test
+# Skip deployment files. They hold server configuration, and deploy/.env holds production secrets.
 deploy

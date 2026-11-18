@@ -47,6 +47,9 @@ services:
       NODE_ENV: production
       # About 75% of APP_MEM, so Node frees memory before Docker kills the container.
       NODE_OPTIONS: --max-old-space-size=${APP_HEAP_MB:-384}
+      # The most Postgres connections the app opens. Set it in loadtest/.env to compare pool sizes between runs without a rebuild.
+      # The default 10 matches the app default, so a run without loadtest/.env tests the same pool as production.
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
       # A fixed test key. This stack is local, so the key protects nothing.
       SESSION_SECRET: loadtest-secret
       # Allow cookies over plain HTTP, because the test runs without HTTPS.
