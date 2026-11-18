@@ -1,12 +1,18 @@
 # k6 pushes its metrics with remote write. Prometheus scrapes the two exporters.
 global:
+  # Collect a sample every 5 seconds. Load test runs are short, so a fine step shows brief spikes.
   scrape_interval: 5s
+  # Evaluate rules at the same pace.
   evaluation_interval: 5s
 
 scrape_configs:
+  # Database metrics: connections, cache hits, locks.
   - job_name: postgres
     static_configs:
+      # The exporter name resolves through compose DNS. Port 9187 is the exporter default.
       - targets: ["postgres-exporter:9187"]
+  # Container metrics: CPU and memory of the app and the database.
   - job_name: cadvisor
     static_configs:
+      # Port 8080 is the cAdvisor default.
       - targets: ["cadvisor:8080"]

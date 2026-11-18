@@ -1,10 +1,17 @@
+# Grafana loads this file at start, so the data source needs no manual setup in the UI.
+# The provisioning file format version.
 apiVersion: 1
 datasources:
   - name: Prometheus
+    # A fixed ID that the dashboard JSON files refer to. Do not change it, or the panels lose their data.
     uid: prom
     type: prometheus
+    # The Grafana server sends the queries, not the browser, so the browser needs no access to Prometheus.
     access: proxy
+    # The Prometheus address inside the compose network.
     url: http://prometheus:9090
+    # Use this source for new panels by default.
     isDefault: true
     jsonData:
+      # Match the scrape interval, so Grafana picks a sensible step for the graphs.
       timeInterval: 5s

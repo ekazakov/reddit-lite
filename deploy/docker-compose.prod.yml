@@ -1,35 +1,55 @@
 # Production on one droplet. Run from this folder with a .env file next to it.
 services:
   db:
+    # Alpine variant: a small image, so the pull is fast and the disk use is low.
     image: postgres:17-alpine
+    # Start the container again after a crash or a reboot, so the site comes back without a person.
     restart: unless-stopped
     environment:
+      # The ":?" form stops compose with an error if the variable is empty, so the database never starts with no password.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Create this database on the first start, so the app has a place to put its tables.
       POSTGRES_DB: reddit_lite
     volumes:
+      # Keep the data in a named volume, so it survives container re-creation.
       - pgdata:/var/lib/postgresql/data
     healthcheck:
+      # Ask Postgres if it accepts connections. The app waits for this check (see depends_on below).
       test: ["CMD-SHELL", "pg_isready -U postgres -d reddit_lite"]
+      # Run the check every 5 seconds.
       interval: 5s
+      # Count a check as failed after 3 seconds with no answer.
       timeout: 3s
+      # Allow 20 failures (about 100 seconds) before the container counts as unhealthy, which covers a slow first start.
       retries: 20
 
   app:
+    # Tag the built image, so you can find it and roll back to it.
     image: reddit-lite:latest
     build:
+      # The Dockerfile is in the parent folder, because this file is in deploy/.
       context: ..
+    # Start the container again after a crash or a reboot.
     restart: unless-stopped
     environment:
+      # Production mode turns on production settings in the app.
       NODE_ENV: production
+      # Connect to the db service by name. Compose DNS resolves "db" inside the network.
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/reddit_lite
+      # The key that signs session cookies. Stop with an error if it is empty, because an empty key lets anyone forge a session.
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      # Send cookies only over HTTPS when true. The default is false, because plain HTTP rejects secure cookies and users could not log in.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # The port that the app listens on inside the container.
       PORT: "3000"
     ports:
+      # Publish container port 3000 on host port 80, so visitors need no port in the URL.
       - "80:3000"
     depends_on:
       db:
+        # Start the app only after the db health check passes, so migrations do not fail on a database that is not ready.
         condition: service_healthy
 
 volumes:
+  # Declare the named volume that the db service uses above.
   pgdata:

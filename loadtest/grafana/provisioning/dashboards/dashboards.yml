@@ -1,8 +1,14 @@
+# Grafana loads this file at start, so the dashboards appear with no manual import.
+# The provisioning file format version.
 apiVersion: 1
 providers:
   - name: loadtest
+    # Group the dashboards in this folder in the Grafana UI.
     folder: Load test
+    # Read dashboards from JSON files on disk.
     type: file
+    # Block deletion in the UI, so the files on disk stay the single source of truth.
     disableDeletion: true
     options:
+      # The folder inside the Grafana container. Compose mounts loadtest/grafana/dashboards here.
       path: /var/lib/grafana/dashboards

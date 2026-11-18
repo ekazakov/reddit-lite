@@ -3,78 +3,118 @@
 # The app and db limits match a 2 vCPU / 2 GB droplet. Change them in loadtest/.env
 # (copy loadtest/.env.example) and pass --env-file loadtest/.env.
 services:
+  # Extend the db service from docker-compose.yml with limits and tuning.
   db:
     # A fixed cgroup path lets cAdvisor find this container (see the cadvisor service).
     cgroup_parent: /loadtest-db
+    # Limit CPU to the droplet size, so results predict production.
     cpus: ${DB_CPUS:-1.0}
+    # Limit memory for the same reason. The kernel kills the container above this.
     mem_limit: ${DB_MEM:-1g}
+    # Pass server settings as -c flags, one per list item.
     command:
       - postgres
       - -c
+      # Load the query statistics module. It needs a server restart, so set it at start.
       - shared_preload_libraries=pg_stat_statements
       - -c
+      # Count queries that run inside functions too, not only top-level ones.
       - pg_stat_statements.track=all
       - -c
+      # Memory for cached table and index pages (about 25% of DB_MEM).
       - shared_buffers=${DB_SHARED_BUFFERS:-256MB}
       - -c
+      # A planner hint for how much the OS can cache (about 75% of DB_MEM). It allocates nothing.
       - effective_cache_size=${DB_EFFECTIVE_CACHE_SIZE:-768MB}
       - -c
+      # Log every statement slower than 200 ms, so you can find slow queries after a run.
       - log_min_duration_statement=200
 
+  # Extend the app service from docker-compose.yml with limits and test settings.
   app:
+    # A fixed cgroup path lets cAdvisor find this container.
     cgroup_parent: /loadtest-app
+    # Limit CPU to the droplet size.
     cpus: ${APP_CPUS:-1.0}
+    # Limit memory to the droplet size.
     mem_limit: ${APP_MEM:-512m}
     environment:
+      # Use production mode, so the test measures what users get.
       NODE_ENV: production
       # About 75% of APP_MEM, so Node frees memory before Docker kills the container.
       NODE_OPTIONS: --max-old-space-size=${APP_HEAP_MB:-384}
+      # A fixed test key. This stack is local, so the key protects nothing.
       SESSION_SECRET: loadtest-secret
+      # Allow cookies over plain HTTP, because the test runs without HTTPS.
       COOKIE_SECURE: "false"
 
+  # The metrics store. It receives k6 results and scrapes the exporters.
   prometheus:
+    # Pin the version, so a new release cannot change the results.
     image: prom/prometheus:v3.5.0
     command:
+      # Read the scrape settings from the mounted file.
       - --config.file=/etc/prometheus/prometheus.yml
+      # Accept metrics that k6 pushes. k6 does not wait to be scraped.
       - --web.enable-remote-write-receiver
+      # Keep 7 days of data, so you can compare runs from the same week.
       - --storage.tsdb.retention.time=7d
     volumes:
+      # Mount the config read-only (:ro), so Prometheus cannot change it.
       - ./loadtest/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Keep the data in a named volume, so it survives a restart.
       - promdata:/prometheus
     ports:
+      # Publish the Prometheus UI on the host, for ad hoc queries.
       - "9090:9090"
 
+  # The dashboards.
   grafana:
+    # Pin the version, so the dashboard JSON keeps working.
     image: grafana/grafana:12.1.0
     environment:
+      # Let visitors in with no login. This stack is local only.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
+      # Give anonymous visitors the Admin role, so you can edit panels.
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      # Hide the login form, because nobody needs it.
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
+      # Load the data source and dashboard provider files at start.
       - ./loadtest/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Load the dashboard JSON files that the provider points to.
       - ./loadtest/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
+      # Use host port 3001, because the app already uses 3000.
       - "3001:3000"
     depends_on:
+      # Start Prometheus first, so the data source works at once.
       - prometheus
 
+  # Turns Postgres statistics into Prometheus metrics.
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
     environment:
+      # The connection string. The names "db" and "reddit_lite" come from the db service.
       DATA_SOURCE_NAME: postgresql://postgres:postgres@db:5432/reddit_lite?sslmode=disable
     command:
+      # Export per-query statistics from pg_stat_statements.
       - --collector.stat_statements
     depends_on:
       db:
+        # Wait for the database, or the exporter fails to connect.
         condition: service_healthy
 
+  # Reports CPU and memory use of the app and db containers.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # cAdvisor needs wide access to the host to read container statistics.
     privileged: true
     # With cgroup v2, a container gets a private cgroup namespace and sees only itself.
     # The host namespace lets cAdvisor see the app and db containers.
     cgroup: host
     volumes:
+      # Read-only host mounts. cAdvisor reads statistics from them and changes nothing.
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
@@ -83,29 +123,44 @@ services:
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     devices:
+      # Let cAdvisor read kernel messages, such as out-of-memory kills.
       - /dev/kmsg
     # cAdvisor cannot read containers from the containerd image store of Docker Desktop.
     # So it reads the app and db cgroups as raw cgroups, by their fixed cgroup_parent paths.
     command:
+      # Do not limit discovery to Docker containers.
       - --docker_only=false
+      # Track only the two cgroups that we care about.
       - --raw_cgroup_prefix_whitelist=/loadtest-app,/loadtest-db
+      # Sample every 5 seconds, to match the Prometheus scrape interval.
       - --housekeeping_interval=5s
+      # Turn off metric groups that the dashboards do not use, to cut CPU use and series count.
       - --disable_metrics=disk,diskIO,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,cpu_topology,resctrl
 
+  # The load generator. It runs only on request, through the "k6" profile.
   k6:
     image: grafana/k6:1.2.0
+    # Do not start k6 with "up". scripts/loadtest/k6.sh starts it with "run".
     profiles: ["k6"]
+    # Run from the mounted folder, so scripts find their data files with relative paths.
     working_dir: /loadtest
     volumes:
+      # Mount scripts, data, and the results folder.
       - ./loadtest:/loadtest
     environment:
+      # The address of the app inside the compose network.
       BASE_URL: http://app:3000
+      # Where k6 pushes its metrics.
       K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      # Send these statistics for each timing metric. Fewer stats means fewer series.
       K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max
+      # Push every 5 seconds, to match the scrape interval.
       K6_PROMETHEUS_RW_PUSH_INTERVAL: 5s
     depends_on:
+      # Make sure that the target and the metrics store are up first.
       - app
       - prometheus
 
 volumes:
+  # Storage for Prometheus data.
   promdata:
