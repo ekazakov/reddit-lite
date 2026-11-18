@@ -77,6 +77,14 @@ pnpm loadtest:stairs -e STEPS=10,20 -e HOLD=1m
 
 Each run saves its summary to `loadtest/results/<script>-<time>.json`. Restore the snapshot before each run, because the write actions change the data.
 
+After k6 ends, `k6.sh` also saves the Prometheus metrics of the run to `loadtest/results/<script>-<time>-prom.json`. The file has app and db CPU, memory, connections, locks, and the slowest queries. It also has a timeline in 30 s buckets and the knee (the first time p95 stays over 500 ms). Prometheus keeps 7 days of data, so you can also export an older run:
+
+```bash
+pnpm loadtest:prom stairs-20261118-205214
+```
+
+The restore resets `pg_stat_statements`. If you want query text in the file, export before the next `restore.sh`.
+
 ## Find the slow queries
 
 ```bash

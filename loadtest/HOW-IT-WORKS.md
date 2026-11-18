@@ -246,7 +246,7 @@ This soak test runs at 70 requests per second for 30 minutes:
 pnpm loadtest:soak -e RATE=70 -e DURATION=30m
 ```
 
-When a run ends, k6 prints a summary in the terminal. It also saves the summary to `loadtest/results/<script>-<time>.json`. A threshold failure does not stop the run, because the thresholds use `abortOnFail: false`. The staircase test must go past the failure point to show what happens there.
+When a run ends, k6 prints a summary in the terminal. It also saves the summary to `loadtest/results/<script>-<time>.json`. Then `scripts/loadtest/prom-summary.ts` reads the run from Prometheus and saves the db, CPU, and memory numbers to `loadtest/results/<script>-<time>-prom.json`. A threshold failure does not stop the run, because the thresholds use `abortOnFail: false`. The staircase test must go past the failure point to show what happens there.
 
 ### Stop the stack
 

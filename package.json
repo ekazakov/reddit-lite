@@ -20,7 +20,8 @@
     "loadtest:smoke": "sh scripts/loadtest/k6.sh smoke",
     "loadtest:stairs": "sh scripts/loadtest/k6.sh stairs",
     "loadtest:soak": "sh scripts/loadtest/k6.sh soak",
-    "loadtest:spike": "sh scripts/loadtest/k6.sh spike"
+    "loadtest:spike": "sh scripts/loadtest/k6.sh spike",
+    "loadtest:prom": "node scripts/loadtest/prom-summary.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.7",

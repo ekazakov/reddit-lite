@@ -26,8 +26,20 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 #   --tag testid=...               label the metrics, so Grafana can select one run
 #   --summary-export ...           save the final numbers as JSON
 #   "$@"                           pass the extra flags from the caller
+# k6 exits with 99 when a threshold fails. "|| RC=$?" keeps that code without a stop from set -e,
+# so the Prometheus export below also runs for failed runs, which are the most useful ones.
+RC=0
 compose run --rm k6 run \
   -o experimental-prometheus-rw \
   --tag testid="$NAME-$STAMP" \
   --summary-export "results/$NAME-$STAMP.json" \
-  "$@" "k6/$NAME.js"
+  "$@" "k6/$NAME.js" || RC=$?
+
+# Wait for the last k6 push and the last exporter scrape. Both happen every 5 seconds.
+sleep 10
+# Save the db, CPU, and memory metrics of the run next to the k6 summary, as <testid>-prom.json.
+# It runs now because the next restore.sh resets pg_stat_statements, and the query text is then lost.
+# A failed export prints a warning only, so it never hides the k6 result.
+node scripts/loadtest/prom-summary.ts "$NAME-$STAMP" || echo "Prometheus export failed. Run it later: node scripts/loadtest/prom-summary.ts $NAME-$STAMP" >&2
+# Exit with the k6 code, so callers still see a threshold failure.
+exit "$RC"
