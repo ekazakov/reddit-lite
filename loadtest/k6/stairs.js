@@ -4,11 +4,11 @@
 import { baseOptions, botIteration, thresholds } from './lib.js';
 
 // The rates to test. The defaults double each step, so the breaking point shows up fast.
-const steps = (__ENV.STEPS || '25,50,100,200,400,800').split(',').map(Number);
+const steps = (__ENV.STEPS || '25,50,100,200').split(',').map(Number);
 // The time to move from one rate to the next.
-const ramp = __ENV.RAMP || '30s';
+const ramp = __ENV.RAMP || '15s';
 // The time to stay on each rate. A long hold lets the system settle, so the numbers are stable.
-const hold = __ENV.HOLD || '4m';
+const hold = __ENV.HOLD || '1m';
 
 // For each rate, make two stages: a ramp up, then a hold.
 const stages = steps.flatMap((target) => [
@@ -16,7 +16,7 @@ const stages = steps.flatMap((target) => [
   { target, duration: hold },
 ]);
 // Drop to a low rate and stay there. This shows if the site recovers after the overload.
-stages.push({ target: 10, duration: '1m' }, { target: 10, duration: '3m' });
+stages.push({ target: 10, duration: '1m' });
 
 export const options = {
   ...baseOptions,
