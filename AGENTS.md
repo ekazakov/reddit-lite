@@ -41,6 +41,16 @@ The tests in `test/app.test.ts` reset the `public` schema of the database in `DA
 - Keep the browser code in `public/` as plain JavaScript with no bundler.
 - Run `pnpm typecheck` and `pnpm test` before you finish a change.
 
+## DevOps, infra, and load testing
+
+When you write or change files for DevOps, infrastructure, or load testing, add a comment to each line or step. The comment must say what the line does and why. This rule covers these files:
+
+- Ansible files in `infra/`
+- Deployment files in `deploy/`
+- Docker and Compose files
+- Shell scripts in `scripts/loadtest/`
+- k6 tests in `loadtest/`
+
 ## Known limits
 
 Users have no passwords. Anyone can act as any user. Do not treat this as a bug to fix unless the task asks for it.
