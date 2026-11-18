@@ -2,6 +2,8 @@
 
 This folder holds the k6 load tests for reddit-lite. The tests run on local Docker. The app and db containers have resource limits that match a 2 vCPU / 2 GB droplet.
 
+For an explanation of each tool, diagrams, and a guide to the dashboards, see [How the load tests work](HOW-IT-WORKS.md).
+
 The plan and the task list are in these documents:
 
 - [Load test plan](https://claude.ai/artifact/9ha7oyfkHyaVyqtFAMsn5J)
