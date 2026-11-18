@@ -3,4 +3,5 @@ import { config } from './config.ts';
 
 export const sql = postgres(config.databaseUrl, {
   onnotice: () => {},
+  max: config.max,
 });

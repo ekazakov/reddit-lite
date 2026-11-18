@@ -4,7 +4,11 @@ import { config } from './config.ts';
 import { sql } from './db.ts';
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
+  console.log('server started');
   console.log(`listening on :${info.port}`);
+  console.log('database connection pool size', config.max);
+  console.log('maxDepth', config.maxDepth);
+  console.log('pageSize', config.pageSize);
 });
 
 async function shutdown(): Promise<void> {

@@ -14,4 +14,5 @@ export const config = {
   cookieSecure: process.env.COOKIE_SECURE === 'true',
   maxDepth: 8,
   pageSize: 25,
+  max: 10,
 };
