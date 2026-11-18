@@ -12,7 +12,15 @@
     "migrate": "node src/migrate.ts",
     "seed": "node scripts/seed.ts",
     "test": "node --test test/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "loadtest:up": "sh scripts/loadtest/compose.sh up -d --build",
+    "loadtest:down": "sh scripts/loadtest/compose.sh down",
+    "loadtest:seed": "sh scripts/loadtest/seed.sh",
+    "loadtest:restore": "sh scripts/loadtest/restore.sh",
+    "loadtest:smoke": "sh scripts/loadtest/k6.sh smoke",
+    "loadtest:stairs": "sh scripts/loadtest/k6.sh stairs",
+    "loadtest:soak": "sh scripts/loadtest/k6.sh soak",
+    "loadtest:spike": "sh scripts/loadtest/k6.sh spike"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.7",

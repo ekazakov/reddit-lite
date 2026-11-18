@@ -1,0 +1,111 @@
+# Load test overlay. Use it together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# The app and db limits match a 2 vCPU / 2 GB droplet. Change them in loadtest/.env
+# (copy loadtest/.env.example) and pass --env-file loadtest/.env.
+services:
+  db:
+    # A fixed cgroup path lets cAdvisor find this container (see the cadvisor service).
+    cgroup_parent: /loadtest-db
+    cpus: ${DB_CPUS:-1.0}
+    mem_limit: ${DB_MEM:-1g}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - shared_buffers=${DB_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${DB_EFFECTIVE_CACHE_SIZE:-768MB}
+      - -c
+      - log_min_duration_statement=200
+
+  app:
+    cgroup_parent: /loadtest-app
+    cpus: ${APP_CPUS:-1.0}
+    mem_limit: ${APP_MEM:-512m}
+    environment:
+      NODE_ENV: production
+      # About 75% of APP_MEM, so Node frees memory before Docker kills the container.
+      NODE_OPTIONS: --max-old-space-size=${APP_HEAP_MB:-384}
+      SESSION_SECRET: loadtest-secret
+      COOKIE_SECURE: "false"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./loadtest/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./loadtest/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./loadtest/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://postgres:postgres@db:5432/reddit_lite?sslmode=disable
+    command:
+      - --collector.stat_statements
+    depends_on:
+      db:
+        condition: service_healthy
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    privileged: true
+    # With cgroup v2, a container gets a private cgroup namespace and sees only itself.
+    # The host namespace lets cAdvisor see the app and db containers.
+    cgroup: host
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      # Docker Desktop uses cgroup v2. cAdvisor needs these two mounts to find the containers.
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    devices:
+      - /dev/kmsg
+    # cAdvisor cannot read containers from the containerd image store of Docker Desktop.
+    # So it reads the app and db cgroups as raw cgroups, by their fixed cgroup_parent paths.
+    command:
+      - --docker_only=false
+      - --raw_cgroup_prefix_whitelist=/loadtest-app,/loadtest-db
+      - --housekeeping_interval=5s
+      - --disable_metrics=disk,diskIO,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,cpu_topology,resctrl
+
+  k6:
+    image: grafana/k6:1.2.0
+    profiles: ["k6"]
+    working_dir: /loadtest
+    volumes:
+      - ./loadtest:/loadtest
+    environment:
+      BASE_URL: http://app:3000
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max
+      K6_PROMETHEUS_RW_PUSH_INTERVAL: 5s
+    depends_on:
+      - app
+      - prometheus
+
+volumes:
+  promdata:

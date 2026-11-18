@@ -1,0 +1,200 @@
+{
+  "uid": "containers",
+  "title": "Containers (app and db)",
+  "schemaVersion": 41,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "tags": [
+    "loadtest"
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU use (1.0 = one CPU)",
+      "description": "A flat line at APP_CPUS or DB_CPUS means the container uses all of its CPU limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\"/loadtest-(app|db)\"}[30s]), \"service\", \"$1\", \"id\", \"/loadtest-(app|db)\")",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU pressure (share of time tasks wait for CPU)",
+      "description": "This value goes up when the container hits its CPU limit. It replaces CPU throttling, which cAdvisor cannot read on Docker Desktop.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "label_replace(rate(container_pressure_cpu_waiting_seconds_total{id=~\"/loadtest-(app|db)\"}[30s]), \"service\", \"$1\", \"id\", \"/loadtest-(app|db)\")",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory",
+      "description": "Compare the working set with APP_MEM and DB_MEM. Near the limit, Docker kills the container.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "label_replace(container_memory_working_set_bytes{id=~\"/loadtest-(app|db)\"}, \"service\", \"$1\", \"id\", \"/loadtest-(app|db)\")",
+          "legendFormat": "{{service}} working set"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "label_replace(container_memory_rss{id=~\"/loadtest-(app|db)\"}, \"service\", \"$1\", \"id\", \"/loadtest-(app|db)\")",
+          "legendFormat": "{{service}} rss"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "I/O pressure (share of time tasks wait for disk)",
+      "description": "For db, this value goes up when the data does not fit in memory and Postgres reads from disk.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "label_replace(rate(container_pressure_io_waiting_seconds_total{id=~\"/loadtest-(app|db)\"}[30s]), \"service\", \"$1\", \"id\", \"/loadtest-(app|db)\")",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    }
+  ]
+}

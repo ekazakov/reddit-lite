@@ -2,6 +2,10 @@ node_modules
 .env
 *.log
 
+# Load tests
+loadtest/data/
+loadtest/results/
+
 # Ansible
 infra/inventory.ini
 .ansible/
