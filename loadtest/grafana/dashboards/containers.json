@@ -15,7 +15,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "CPU use (1.0 = one CPU)",
-      "description": "A flat line at APP_CPUS or DB_CPUS means the container uses all of its CPU limit.",
+      "description": "The app and db share the CPUs in SUT_CPUSET (2 by default). If app plus db stays flat at that number, the droplet is out of CPU.",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"

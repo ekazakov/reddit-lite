@@ -2,13 +2,17 @@
 #   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
 # The app and db limits match a 2 vCPU / 2 GB droplet. Change them in loadtest/.env
 # (copy loadtest/.env.example) and pass --env-file loadtest/.env.
+# CPU split: app and db share the cores in SUT_CPUSET, as they share the vCPUs of the one
+# production droplet. All other services run on TOOLS_CPUSET, so they take no CPU from app and db.
+# Both lists use CPU numbers of the Docker VM. A number that the VM does not have stops the container from starting.
 services:
   # Extend the db service from docker-compose.yml with limits and tuning.
   db:
     # A fixed cgroup path lets cAdvisor find this container (see the cadvisor service).
     cgroup_parent: /loadtest-db
-    # Limit CPU to the droplet size, so results predict production.
-    cpus: ${DB_CPUS:-1.0}
+    # Run only on the droplet cores, shared with the app, so results predict production.
+    # cpuset sets where the processes run, not a time quota, so there are no throttling pauses.
+    cpuset: ${SUT_CPUSET:-0-1}
     # Limit memory for the same reason. The kernel kills the container above this.
     mem_limit: ${DB_MEM:-1g}
     # Pass server settings as -c flags, one per list item.
@@ -34,8 +38,8 @@ services:
   app:
     # A fixed cgroup path lets cAdvisor find this container.
     cgroup_parent: /loadtest-app
-    # Limit CPU to the droplet size.
-    cpus: ${APP_CPUS:-1.0}
+    # Run on the same droplet cores as the db. Either one can use both cores when the other is idle.
+    cpuset: ${SUT_CPUSET:-0-1}
     # Limit memory to the droplet size.
     mem_limit: ${APP_MEM:-512m}
     environment:
@@ -52,6 +56,8 @@ services:
   prometheus:
     # Pin the version, so a new release cannot change the results.
     image: prom/prometheus:v3.5.0
+    # Keep off the app and db cores, so metric storage takes no CPU from the system under test.
+    cpuset: ${TOOLS_CPUSET:-2-5}
     command:
       # Read the scrape settings from the mounted file.
       - --config.file=/etc/prometheus/prometheus.yml
@@ -72,6 +78,8 @@ services:
   grafana:
     # Pin the version, so the dashboard JSON keeps working.
     image: grafana/grafana:12.1.0
+    # Keep off the app and db cores, so dashboard queries take no CPU from the system under test.
+    cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
       # Let visitors in with no login. This stack is local only.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -94,6 +102,8 @@ services:
   # Turns Postgres statistics into Prometheus metrics.
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
+    # Keep the exporter process off the db cores. Its SQL queries still run inside the db container.
+    cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
       # The connection string. The names "db" and "reddit_lite" come from the db service.
       DATA_SOURCE_NAME: postgresql://postgres:postgres@db:5432/reddit_lite?sslmode=disable
@@ -108,6 +118,8 @@ services:
   # Reports CPU and memory use of the app and db containers.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # Keep off the app and db cores, so reading statistics takes no CPU from the system under test.
+    cpuset: ${TOOLS_CPUSET:-2-5}
     # cAdvisor needs wide access to the host to read container statistics.
     privileged: true
     # With cgroup v2, a container gets a private cgroup namespace and sees only itself.
@@ -140,6 +152,8 @@ services:
   # The load generator. It runs only on request, through the "k6" profile.
   k6:
     image: grafana/k6:1.2.0
+    # Keep the load generator off the app and db cores. Thousands of VUs need a lot of CPU.
+    cpuset: ${TOOLS_CPUSET:-2-5}
     # Do not start k6 with "up". scripts/loadtest/k6.sh starts it with "run".
     profiles: ["k6"]
     # Run from the mounted folder, so scripts find their data files with relative paths.

@@ -10,13 +10,13 @@ Two groups of containers run together. The system under test is the app and the 
 
 ```mermaid
 flowchart LR
-    subgraph sut["System under test (limited)"]
-        app["app<br/>Node + Hono<br/>1 CPU, 512 MB"]
-        db[("db<br/>Postgres 17<br/>1 CPU, 1 GB")]
+    subgraph sut["System under test (CPUs 0-1, shared)"]
+        app["app<br/>Node + Hono<br/>512 MB"]
+        db[("db<br/>Postgres 17<br/>1 GB")]
         app -- "SQL, pool of 10" --> db
     end
 
-    subgraph measure["Measurement"]
+    subgraph measure["Measurement (CPUs 2-5)"]
         k6["k6<br/>load generator"]
         pgexp["postgres-exporter<br/>:9187"]
         cadv["cAdvisor<br/>:8080"]
@@ -61,13 +61,15 @@ The overlay sets the limits from these variables. You can change them in `loadte
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `APP_CPUS` | `1.0` | CPU limit for the app container |
+| `SUT_CPUSET` | `0-1` | Docker VM CPUs that the app and db share, like the 2 vCPUs of the droplet |
+| `TOOLS_CPUSET` | `2-5` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
 | `APP_MEM` | `512m` | Memory limit for the app container |
 | `APP_HEAP_MB` | `384` | Node heap limit, about 75% of `APP_MEM` |
-| `DB_CPUS` | `1.0` | CPU limit for the db container |
 | `DB_MEM` | `1g` | Memory limit for the db container |
 | `DB_SHARED_BUFFERS` | `256MB` | Postgres `shared_buffers`, about 25% of `DB_MEM` |
 | `DB_EFFECTIVE_CACHE_SIZE` | `768MB` | Postgres `effective_cache_size`, about 75% of `DB_MEM` |
+
+The CPU limit is a cpuset (a list of CPUs that the processes can run on), not a time quota. In production the app and db run on one droplet and share its 2 vCPUs, so here they share 2 CPUs too. When one of them is idle, the other can use both CPUs. A time quota (`cpus: 1.0`) lets processes run on all VM CPUs at once and then stops them until the next 100 ms period. Those pauses add latency that a real droplet does not have.
 
 ### Seed generator and restore
 
@@ -142,7 +144,7 @@ The main tests use an open model. In an open model, k6 starts new iterations at 
 | `soak` | Find memory and connection leaks over time | `constant-arrival-rate` | `RATE=50`, `DURATION=1h`, `PRE_VUS=100`, `MAX_VUS=1000` |
 | `spike` | See if the site recovers after a sudden burst | `ramping-arrival-rate` | `BASE_RATE=20`, `PEAK=200` (the spike goes to 2 times `PEAK`) |
 
-The staircase test raises the rate in steps and holds each step. The hold gives the app, the pool, and the Postgres cache time to settle, so each step gives a stable value. At the end, the rate drops to 10 requests per second for 4 minutes. This part shows if the site recovers. The chart shows the default profile. One run takes about 31 minutes.
+The staircase test raises the rate in steps and holds each step. The hold gives the app, the pool, and the Postgres cache time to settle, so each step gives a stable value. At the end, the rate drops to 10 requests per second for 4 minutes. This part shows whether the site recovers. The chart shows the default profile. One run takes about 31 minutes.
 
 ```mermaid
 xychart-beta
@@ -173,7 +175,7 @@ flowchart TD
 ### Before you start
 
 1. Install Docker Desktop, Node 24 or later, and pnpm.
-2. In Docker Desktop, open Settings > Resources. Set at least 6 CPUs and 6 GB of memory. The monitoring containers and k6 use the CPU above the app and db limits.
+2. In Docker Desktop, open Settings > Resources. Set at least 6 CPUs and 6 GB of memory. The app and db share CPUs 0 and 1. The monitoring containers and k6 run on CPUs 2 to 5.
 3. If you want other limits, copy the example file and change the values:
 
    ```bash

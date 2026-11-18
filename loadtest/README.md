@@ -11,15 +11,15 @@ The plan and the task list are in these documents:
 
 ## Before you start
 
-1. Set the Docker Desktop VM to at least 6 CPUs and 6 GB of memory (Settings > Resources). The monitoring containers and k6 use the CPU above the app and db limits.
+1. Set the Docker Desktop VM to at least 6 CPUs and 6 GB of memory (Settings > Resources). The app and db share CPUs 0 and 1. The monitoring containers and k6 run on CPUs 2 to 5, so they take no CPU from the app and db.
 2. If you want other limits, copy `loadtest/.env.example` to `loadtest/.env` and change the values. If `loadtest/.env` exists, the scripts read it.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `APP_CPUS` | `1.0` | CPU limit for the app container |
+| `SUT_CPUSET` | `0-1` | Docker VM CPUs that the app and db share, like the 2 vCPUs of the droplet |
+| `TOOLS_CPUSET` | `2-5` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
 | `APP_MEM` | `512m` | Memory limit for the app container |
 | `APP_HEAP_MB` | `384` | Node heap limit, about 75% of `APP_MEM` |
-| `DB_CPUS` | `1.0` | CPU limit for the db container |
 | `DB_MEM` | `1g` | Memory limit for the db container |
 | `DB_SHARED_BUFFERS` | `256MB` | Postgres `shared_buffers`, about 25% of `DB_MEM` |
 | `DB_EFFECTIVE_CACHE_SIZE` | `768MB` | Postgres `effective_cache_size`, about 75% of `DB_MEM` |
@@ -93,8 +93,9 @@ sh scripts/loadtest/compose.sh logs db
 
 | What you see | What it means |
 |---|---|
-| CPU use flat at `APP_CPUS` and CPU pressure above 0 for the app | The app uses all of its CPU limit. The Node event loop is the limit. |
-| CPU use flat at `DB_CPUS` and CPU pressure above 0 for the db | Postgres uses all of its CPU limit. Find the query with `pg_stat_statements`. |
+| App CPU plus db CPU flat at 2.0 (the size of `SUT_CPUSET`) and CPU pressure above 0 | The droplet is out of CPU. The service with the larger share is the one to optimize. |
+| App CPU flat at 1.0 while the db CPU is low, and CPU pressure above 0 for the app | The Node event loop is the limit. It uses one core only. A second free core does not help it. |
+| Db CPU high and CPU pressure above 0 for the db | Postgres needs more CPU than it gets. Find the query with `pg_stat_statements`. |
 | Many connections in state `active` or `idle in transaction`, and the app CPU is low | The postgres.js pool (10 connections) is the limit. Requests wait for a connection. |
 | The cache hit ratio falls below 99% | The data does not fit in the db memory. Reads go to disk. |
 | Many `RowExclusiveLock` or `ExclusiveLock` locks during comment writes | Comments on a hot post wait for the `FOR UPDATE` lock on the post row. |
