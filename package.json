@@ -26,7 +26,7 @@
     "security:scan": "sh scripts/security/scan.sh"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.7",
+    "@hono/node-server": "2.1.8",
     "hono": "4.13.18",
     "postgres": "4.1.1"
   },
