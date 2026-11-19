@@ -1,7 +1,8 @@
 # Local development: app on http://localhost:3000
 services:
   db:
-    image: postgres:17-alpine
+    # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
+    image: postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: reddit_lite

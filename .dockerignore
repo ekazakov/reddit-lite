@@ -9,3 +9,5 @@ node_modules
 test
 # Skip deployment files. They hold server configuration, and deploy/.env holds production secrets.
 deploy
+# Skip agent settings and worktrees. Worktrees hold full copies of other branches and make the build context large.
+.claude
