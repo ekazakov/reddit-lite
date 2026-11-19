@@ -27,7 +27,7 @@ jobs:
       # A throwaway Postgres for the tests. The tests reset the public schema, which is safe here.
       postgres:
         # The same image and digest as docker-compose.yml, so CI tests against the database version we run.
-        image: postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
+        image: postgres:18-alpine@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
         env:
           # Password and database name that match DATABASE_URL below.
           POSTGRES_PASSWORD: postgres
