@@ -200,6 +200,14 @@ trap restore_default EXIT
 # Ctrl+C runs the EXIT trap too.
 trap 'exit 130' INT TERM
 
+# Choose the stdin of k6. docker compose run gives the container a TTY only when its stdin is a terminal,
+# and without a TTY k6 prints a new progress block every second instead of one line that updates in place.
+# The loop below takes its stdin from the here-document, so k6 must get the terminal from /dev/tty.
+K6_STDIN=/dev/null  # The default when no terminal is present, for example in CI or under nohup.
+# Use the terminal only when stdout is a terminal too, so a redirected run gets no progress escape codes.
+# The open test in a subshell fails without a message when the shell has no controlling terminal.
+if [ -t 1 ] && (: < /dev/tty) 2>/dev/null; then K6_STDIN=/dev/tty; fi
+
 # Run each variant. The here-document keeps the loop in this shell, so traps and counters work.
 FIRST=1
 while read -r name settings; do  # One variant per line of the here-document below.
@@ -220,7 +228,8 @@ while read -r name settings; do  # One variant per line of the here-document bel
       sh scripts/loadtest/restore.sh >> "$LOG" 2>&1 || { say "  $name: restore failed. Skipped."; exit 0; }
       # Run k6. A threshold failure (exit 99) is a normal result for an overload test.
       RC=0
-      sh scripts/loadtest/k6.sh "$SCRIPT" "$@" || RC=$?  # Keep the exit code without a stop from set -e.
+      # "< $K6_STDIN" gives k6 the terminal, so its progress updates in place. It reads /dev/tty, not the variant lines.
+      sh scripts/loadtest/k6.sh "$SCRIPT" "$@" < "$K6_STDIN" || RC=$?  # Keep the exit code without a stop from set -e.
       say "  $name: k6 exit code $RC"  # Log the result of the run.
     # docker compose reads stdin. Without /dev/null it would eat the variant lines that the loop reads,
     # and the batch would stop after the first variant.
