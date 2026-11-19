@@ -186,13 +186,13 @@ importers:
         version: 4.1.1
     devDependencies:
       '@types/node':
-        specifier: ^26.6.6
+        specifier: 26.6.6
         version: 26.6.6
       typescript:
-        specifier: ^7.0.2
+        specifier: 7.0.2
         version: 7.0.2
       uplot:
-        specifier: ^1.6.32
+        specifier: 1.6.32
         version: 1.6.32
 
 packages:
