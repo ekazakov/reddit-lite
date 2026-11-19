@@ -1,7 +1,10 @@
-// Saves a summary of the Prometheus metrics for one load test run to loadtest/results/<testid>-prom.json.
+// Saves a summary of the Prometheus metrics for one load test run to loadtest/results/<testid>/prom.json.
+// It also saves the raw 5 s points of every series to loadtest/results/<testid>/prom-series.json for the HTML report.
 // The k6 summary JSON has only k6 numbers. This file adds app and db CPU, memory, Postgres activity,
 // locks, and the slowest queries, and splits the run into time buckets so you can find the knee.
-// Usage: node scripts/loadtest/prom-summary.ts <testid> [bucket-seconds]
+// Usage: node scripts/loadtest/prom-summary.ts <testid> [bucket-seconds] [--series-only]
+// --series-only writes prom-series.json and keeps an existing prom.json. migrate-results.sh uses it for old runs,
+// because a new prom.json would lose the query text after restore.sh resets pg_stat_statements.
 // Example: node scripts/loadtest/prom-summary.ts stairs-20261118-205214 30
 // PROM_URL changes the Prometheus address. The file records the app and db cpuset, read from the db container.
 
@@ -17,9 +20,13 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 // Prometheus is published on host port 9090 by docker-compose.loadtest.yml.
 const PROM = process.env.PROM_URL ?? 'http://localhost:9090';
 // The run id that k6.sh puts on every k6 metric, for example stairs-20261118-205214.
-const testid = process.argv[2];
+// Flags start with "--". The other arguments are positional.
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+// True when only the raw series file is wanted.
+const seriesOnly = process.argv.includes('--series-only');
+const testid = positional[0];
 // Bucket size for the timeline. 30 s gives about two buckets per stair step with the default 1m hold.
-const bucketSeconds = Number(process.argv[3] ?? 30);
+const bucketSeconds = Number(positional[1] ?? 30);
 // Prometheus scrapes and k6 pushes every 5 s, so a finer step adds no information.
 const STEP = 5;
 // Extra time on each side of the run, so the first and last pushes and scrapes are inside the window.
@@ -110,6 +117,10 @@ const SERIES: { name: string; unit: string; expr: string }[] = [
   { name: 'k6_vus', unit: 'VUs', expr: `sum(k6_vus{${T}})` },
   // The worst p95 over all actions in each 5 s push window, in ms (k6 sends seconds).
   { name: 'k6_p95_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p95{${T}}) * 1000` },
+  // The worst p50 over all actions in each 5 s push window, in ms. The report draws it for runs without a k6 CSV.
+  { name: 'k6_p50_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p50{${T}}) * 1000` },
+  // The worst p99 over all actions in each 5 s push window, in ms.
+  { name: 'k6_p99_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p99{${T}}) * 1000` },
   // The p95 for each action, in ms. It shows which page gets slow first.
   { name: 'k6_p95_ms_by_action', unit: 'ms', expr: `max by (action) (k6_http_req_duration_p95{${T}}) * 1000` },
   // Share of failed requests. k6 counts timeouts and unexpected status codes as failed.
@@ -348,12 +359,26 @@ async function main() {
     timeline,
   };
 
-  // Make sure that the results folder exists, because it is not in git.
-  mkdirSync(join(ROOT, 'loadtest/results'), { recursive: true });
-  // Save next to the k6 summary, with the same run id in the name.
-  const file = join(ROOT, 'loadtest/results', `${testid}-prom.json`);
-  // Indent the JSON, so it is easy to read and to diff between runs.
-  writeFileSync(file, JSON.stringify(result, null, 2) + '\n');
+  // Each run has its own folder. k6.sh makes it, but an older run exported later may not have one yet.
+  const dir = join(ROOT, 'loadtest/results', testid);
+  // Make the folder, because loadtest/results is not in git.
+  mkdirSync(dir, { recursive: true });
+  // Save next to the k6 summary in the run folder.
+  const file = join(dir, 'prom.json');
+  // Indent the JSON, so it is easy to read and to diff between runs. Skip it with --series-only.
+  if (!seriesOnly) writeFileSync(file, JSON.stringify(result, null, 2) + '\n');
+
+  // The raw points for the report charts: series name, then label key, then [seconds from start, value] pairs.
+  const raw: Record<string, { unit: string; values: Record<string, [number, number][]> }> = {};
+  // Reuse the samples fetched above, so this needs no extra Prometheus queries.
+  SERIES.forEach((s, i) => {
+    // Keep the unit, so the report can label the axis.
+    raw[s.name] = { unit: s.unit, values: {} };
+    // One point list per label value, with the time relative to the window start like the timeline.
+    for (const r of sampled[i]) raw[s.name].values[labelKey(r.metric)] = (r.values ?? []).map(([t, v]) => [t - start, Number(Number(v).toPrecision(4))]);
+  });
+  // The window start lets the report line up these points with the k6 CSV, which has Unix times.
+  writeFileSync(join(dir, 'prom-series.json'), JSON.stringify({ testid, start, end, step_s: STEP, series: raw }) + '\n');
 
   // Print a short table, so the main numbers show in the terminal after a run.
   const n = (x: unknown, d = 0) => (x === undefined ? '-' : (x as { avg: number }).avg.toFixed(d));
@@ -368,8 +393,8 @@ async function main() {
   }
   // Show where the knee is, or that there was none.
   console.log(kneeRow ? `Knee: p95 over ${P95_LIMIT_MS} ms from ${kneeRow.from_s} s` : `No bucket with p95 over ${P95_LIMIT_MS} ms`);
-  // Show where the file is.
-  console.log(`Saved ${file}`);
+  // Show where the files are.
+  console.log(seriesOnly ? `Saved ${join(dir, 'prom-series.json')}` : `Saved ${file} and prom-series.json`);
 }
 
 // Run, and exit with code 1 on any error, so k6.sh can report it.

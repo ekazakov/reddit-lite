@@ -75,15 +75,106 @@ pnpm loadtest:stairs -e STEPS=10,20 -e HOLD=1m
 | `soak` | `RATE`, `DURATION` | `50`, `1h` |
 | `spike` | `BASE_RATE`, `PEAK` | `20`, `200` (the spike goes to 2 times `PEAK`) |
 
-Each run saves its summary to `loadtest/results/<script>-<time>.json`. Restore the snapshot before each run, because the write actions change the data.
+Restore the snapshot before each run, because the write actions change the data.
 
-After k6 ends, `k6.sh` also saves the Prometheus metrics of the run to `loadtest/results/<script>-<time>-prom.json`. The file has app and db CPU, memory, connections, locks, and the slowest queries. It also has a timeline in 30 s buckets and the knee (the first time p95 stays over 500 ms). Prometheus keeps 7 days of data, so you can also export an older run:
+## Run results
+
+Each run saves its files in one folder, `loadtest/results/<script>-<time>/`. The folder name is the test id. Grafana and Prometheus use the same id in the `testid` label.
+
+| File | Content |
+|---|---|
+| `meta.json` | What ran: the script, the `-e` flags, the git commit, the times, and the k6 exit code. It also has the real app and db configuration before and after the run. |
+| `summary.json` | The k6 summary (`--summary-export`) |
+| `k6.csv.gz` | Every k6 sample (`--out csv`). It has one row per request metric, so it is the largest file. |
+| `prom.json` | App and db CPU, memory, connections, locks, and the slowest queries. It also has a timeline in 30 s buckets and the knee (the first time p95 stays over 500 ms). |
+| `prom-series.json` | The raw 5 s Prometheus points of every series in `prom.json` |
+| `timeseries.json` | 1 s and 10 s buckets from `k6.csv.gz`, with exact p50, p95, and p99 overall and per action. The report builds it on first use. |
+| `report.html` | The report of this run |
+
+The real configuration comes from `docker inspect` and `SHOW` in Postgres (`scripts/loadtest/sut-config.ts`), not from `loadtest/.env`. If a value did not apply, the report shows it.
+
+Prometheus keeps 7 days of data, so you can export the Prometheus files of an older run again:
 
 ```bash
 pnpm loadtest:prom stairs-20261118-205214
 ```
 
-The restore resets `pg_stat_statements`. If you want query text in the file, export before the next `restore.sh`.
+The restore resets `pg_stat_statements`. If you want query text in `prom.json`, export before the next `restore.sh`.
+
+If you have result files from before the run folders (`<testid>.json` and `<testid>-prom.json`), move them into folders once:
+
+```bash
+pnpm loadtest:migrate-results
+```
+
+## HTML report
+
+`k6.sh` builds `report.html` in the run folder after each run. The page is one file with the charts and the data inline, so it opens from disk without a server or internet.
+
+To compare runs on one page, pass the run ids or a selection. The page is saved in `loadtest/results/reports/`:
+
+```bash
+pnpm loadtest:report stairs-20261118-205214 stairs-20261119-091500
+```
+
+```bash
+pnpm loadtest:report --last 3 --baseline stairs-20261118-205214
+```
+
+| Option | Selects |
+|---|---|
+| `<testid> ...` | The given runs |
+| `--all` | Every run folder |
+| `--last N` | The N newest runs |
+| `--match TEXT` | Runs whose id has TEXT |
+| `--batch ID` | The runs of one `matrix.sh` batch |
+| `--baseline ID` | The run that the deltas compare against. The default is the first run. |
+| `--out FILE` | Another output file |
+
+The page has these parts:
+
+- Runs and Configuration: what ran, and the pool size, cpuset, and memory of each run. Cells that differ between runs have a yellow background.
+- Summary: the main numbers of each run, with the change against the baseline. Green is better and red is worse.
+- Over time: k6 load and latency, container CPU and memory, and Postgres charts. Runs line up at the first k6 sample. Dashed lines show the limits: p95 500 ms, the core count, the memory limits, and `DB_POOL_MAX`.
+- Against offered rate: one point per 10 s bucket, with the offered rate on the x axis. Runs with different `STEPS` compare directly here. The rate where the p95 points leave the bottom is the knee.
+- Slowest queries and checks.
+
+The summary row "Max sustained rate" is the highest 10 s offered rate that stays in the limits. The limits are p95 at or under 500 ms, no dropped iterations, and under 1% errors. Use it as the capacity of a configuration.
+
+## Compare configurations
+
+`scripts/loadtest/matrix.sh` runs the same test with several app and db configurations in a row. Each line of a matrix file is one variant:
+
+```
+# name        configuration
+pool10        DB_POOL_MAX=10 SUT_CPUSET=0-1 APP_MEM=512m DB_MEM=1g
+pool20        DB_POOL_MAX=20 SUT_CPUSET=0-1 APP_MEM=512m DB_MEM=1g
+pool10-1cpu   DB_POOL_MAX=10 SUT_CPUSET=0   APP_MEM=512m DB_MEM=1g
+```
+
+The allowed keys are `DB_POOL_MAX`, `SUT_CPUSET`, `APP_MEM`, `APP_HEAP_MB`, `DB_MEM`, `DB_SHARED_BUFFERS`, and `DB_EFFECTIVE_CACHE_SIZE`. Keys that a line leaves out come from `loadtest/.env`. If a line sets `APP_MEM` but not `APP_HEAP_MB`, the heap is 75% of `APP_MEM`. If a line sets `DB_MEM`, `shared_buffers` is 25% and `effective_cache_size` is 75% of it. These are the same ratios as in `.env.example`. App and db always share the one `SUT_CPUSET`.
+
+1. Make sure that the matrix is valid. A dry run checks every line and prints the configuration, but starts nothing:
+
+   ```bash
+   DRY_RUN=1 pnpm loadtest:matrix loadtest/matrix/example.txt
+   ```
+
+2. Run the batch. The script name and the k6 flags follow the file name:
+
+   ```bash
+   pnpm loadtest:matrix loadtest/matrix/example.txt stairs -e STEPS=25,50,75,100 -e HOLD=1m
+   ```
+
+For each variant, the script recreates the app and db containers with the variant configuration, restores the snapshot, and runs `k6.sh`. Docker applies the cpuset and the memory limit only when it creates a container. Postgres reads its `-c` flags at the same time. For these reasons a restart is not enough. At the end the script recreates app and db with the `loadtest/.env` values, and builds `loadtest/results/reports/batch-<batch>.html`. The first line is the baseline. The log of the batch is next to the report.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REPEAT` | `1` | Runs per variant. Use 2 or 3 to see how much results change between equal runs. |
+| `COOLDOWN` | `30` | Seconds between runs |
+| `DRY_RUN` | empty | Set to 1 to check the matrix only |
+
+`SUT_CPUSET` must not overlap `TOOLS_CPUSET`. To test more cores for app and db, first make `TOOLS_CPUSET` smaller in `loadtest/.env`, and run `scripts/loadtest/compose.sh up -d` so that the tools move.
 
 ## Find the slow queries
 
