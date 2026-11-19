@@ -65,6 +65,16 @@
   // The label keys of a Prometheus series, for example ["app", "db"] or the connection states.
   const promKeys = (run, name) => Object.keys(get(run, 'promSeries.series.' + name + '.values') || {});
 
+  // The worst value over all actions per bucket, for p50, p95, or p99. Prometheus has percentiles only per action,
+  // so this is the one definition that runs with and without a CSV share. prom.json finds the knee the same way.
+  function worst(ts, key) {
+    const cols = Object.values(ts.by_action).map((a) => a[key]);
+    return Array.from({ length: ts.length }, (_, i) => {
+      const vs = cols.map((c) => c[i]).filter((v) => v !== null);
+      return vs.length ? Math.max(...vs) : null;
+    });
+  }
+
   // One column of the k6 CSV buckets at the chosen resolution, with x in seconds from t0.
   function tsLine(run, pick) {
     const ts = run.ts && run.ts[state.res];
@@ -106,13 +116,15 @@
     };
     const ts = run.ts && run.ts.s10;
     if (ts) {
+      // Compute the worst-action p95 column once, not once per bucket.
+      const p95 = worst(ts, 'p95');
       for (let i = 0; i < ts.length; i++) {
         const from = ts.start - t0(run) + i * 10;
         out.push({
           from,
           offered: ts.offered[i],
           http: ts.http[i],
-          p95: ts.p95[i],
+          p95: p95[i],
           dropped: ts.dropped[i],
           failedShare: ts.http[i] ? ts.failed[i] / ts.http[i] : 0,
           appCpu: promAvg('cpu_cores', 'app', from, from + 10),
@@ -142,9 +154,20 @@
 
   // The highest 10 s offered rate that the app served within the limits: p95 under 500 ms, no dropped
   // iterations, and under 1% errors. It is the "capacity" number to compare between configurations.
+  // "Sustained" means 3 good buckets in a row (30 s), so a short good bucket at the start of a step,
+  // before the queue builds up, does not count. The rate of a window is its lowest bucket rate.
   function maxSustained(run) {
-    const good = buckets10(run).filter((b) => b.p95 <= P95_LIMIT && (b.dropped ?? 0) < 0.05 && b.failedShare < 0.01);
-    return good.length ? maxOf(good.map((b) => b.offered)) : null;
+    const ok = (b) => b.p95 <= P95_LIMIT && (b.dropped ?? 0) < 0.05 && b.failedShare < 0.01;
+    const bs = buckets10(run);
+    let best = null;
+    for (let i = 0; i + 2 < bs.length; i++) {
+      const w = bs.slice(i, i + 3);
+      // The buckets must be next to each other in time. buckets10 drops empty buckets, which can leave gaps.
+      if (w[2].from - w[0].from !== 20 || !w.every(ok)) continue;
+      const rate = Math.min(...w.map((b) => b.offered));
+      if (best === null || rate > best) best = rate;
+    }
+    return best;
   }
 
   // A whole-run k6 summary value, for example summaryMetric(run, 'http_req_duration', 'p(95)').
@@ -245,11 +268,11 @@
           k6(r, 'dropped it/s', (t) => t.dropped, 'k6_dropped_rps'),
           k6(r, 'http req/s', (t) => t.http, 'k6_http_rps'),
         ]) },
-      { group: 'k6', title: 'Latency p50 / p95 / p99', unit: 'ms', hint: `${resNote} The dashed line is the 500 ms p95 limit.`, yMin: 0,
+      { group: 'k6', title: 'Latency p50 / p95 / p99 (worst action)', unit: 'ms', hint: `${resNote} Each point is the slowest action in the bucket, the same in CSV and Prometheus data. The dashed line is the 500 ms p95 limit.`, yMin: 0,
         lines: linesFor((r) => [
-          k6(r, 'p50', (t) => t.p50, 'k6_p50_ms_worst'),
-          k6(r, 'p95', (t) => t.p95, 'k6_p95_ms_worst'),
-          k6(r, 'p99', (t) => t.p99, 'k6_p99_ms_worst'),
+          k6(r, 'p50', (t) => worst(t, 'p50'), 'k6_p50_ms_worst'),
+          k6(r, 'p95', (t) => worst(t, 'p95'), 'k6_p95_ms_worst'),
+          k6(r, 'p99', (t) => worst(t, 'p99'), 'k6_p99_ms_worst'),
           limitLine(r, 'p95 limit', P95_LIMIT),
         ]) },
       RUNS.length === 1
@@ -342,7 +365,14 @@
       ['effective_cache_size', (r) => get(r, 'meta.sut.db.effective_cache_size')],
       ['max_connections', (r) => get(r, 'meta.sut.db.max_connections')],
       // OOM kills and restarts are read again after the run. A change means that a container died during the run.
-      ['OOM killed', (r) => { const a = get(r, 'meta.sut_after'); return a ? (get(a, 'app.oom_killed') || get(a, 'db.oom_killed') ? 'yes' : 'no') : undefined; }],
+      // Docker keeps OOMKilled from the last exit, which can be from an earlier run. It counts for this run only if
+      // it was false before the run, or if the container restarted during the run.
+      ['OOM killed', (r) => {
+        const b = get(r, 'meta.sut'); const a = get(r, 'meta.sut_after');
+        if (!a) return undefined;
+        const inRun = (svc) => get(a, svc + '.oom_killed') && (!get(b, svc + '.oom_killed') || get(a, svc + '.restart_count') > get(b, svc + '.restart_count'));
+        return inRun('app') || inRun('db') ? 'yes' : 'no';
+      }],
       ['restarts in run', (r) => { const b = get(r, 'meta.sut'); const a = get(r, 'meta.sut_after'); return b && a ? (get(a, 'app.restart_count') - get(b, 'app.restart_count')) + (get(a, 'db.restart_count') - get(b, 'db.restart_count')) : undefined; }],
     ];
     const values = cols.map(([, f]) => RUNS.map((r) => f(r)));
@@ -361,7 +391,7 @@
   function summaryRows() {
     const actions = [...new Set(RUNS.flatMap((r) => Object.keys(get(r, 'ts.total.by_action') || {})))].sort();
     const rows = [
-      ['Max sustained rate', 'it/s', 1, 1, (r) => maxSustained(r), 'Highest 10 s offered rate with p95 ≤ 500 ms, no drops, and < 1% errors.'],
+      ['Max sustained rate', 'it/s', 1, 1, (r) => maxSustained(r), 'Highest offered rate held for 30 s (3 buckets of 10 s in a row) with the worst-action p95 ≤ 500 ms, no drops, and < 1% errors.'],
       ['Knee offered rate', 'it/s', 1, 1, (r) => get(r, 'prom.knee.offered_rps.avg'), 'From prom.json: the first 30 s bucket where p95 stays over 500 ms.'],
       ['Knee time', 's', 0, 0, (r) => get(r, 'prom.knee.from_s')],
       ['Peak HTTP rate (10 s)', 'req/s', 1, 1, (r) => maxOf(buckets10(r).map((b) => b.http))],

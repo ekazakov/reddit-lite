@@ -20,7 +20,7 @@ function compose(args: string[]): string {
   return execFileSync('sh', [COMPOSE, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 }
 
-// Counts the CPUs in a cpuset list such as "0-1" or "0,2-3". The same rule as in prom-summary.ts.
+// Counts the CPUs in a cpuset list such as "0-1" or "0,2-3". prom-summary.ts imports it too.
 export function countCpus(list: string): number {
   // Add 1 for a single CPU, or the range length for "a-b".
   return list.split(',').filter(Boolean).reduce((n, part) => {
@@ -110,5 +110,6 @@ export function sutConfig() {
   };
 }
 
-// Print the JSON when the file runs as a script, not when a test imports it.
-if (import.meta.main) console.log(JSON.stringify(sutConfig(), null, 2));
+// Print the JSON when the file runs as a script, not when another file imports it.
+// import.meta.main needs Node 24.2, so compare the started script with this file. That works on every Node 24.
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) console.log(JSON.stringify(sutConfig(), null, 2));

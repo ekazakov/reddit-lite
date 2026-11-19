@@ -36,6 +36,8 @@ done
 
 # Give every run folder a meta.json, so the report can list it. Old runs did not record one.
 for d in "$DIR"/*/; do
+  # The glob stays literal when the folder has no subfolders. Skip that case, as the first loop does.
+  [ -d "$d" ] || continue
   # The run id is the folder name.
   id=$(basename "$d")
   # The reports folder is not a run.

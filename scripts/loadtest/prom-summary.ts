@@ -14,6 +14,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 // join and resolve build paths from this file location, so the script works from any folder.
 import { join, resolve } from 'node:path';
+// The cpuset parser that sut-config.ts also uses, so prom.json and meta.json count cores the same way.
+import { countCpus } from './sut-config.ts';
 
 // The repository root is two folders above this file.
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -213,15 +215,6 @@ function queryTexts(): Record<string, string> {
   }
 }
 
-// Counts the CPUs in a cpuset list such as "0-1" or "0,2-3". Each item is one CPU or a range.
-function countCpus(list: string): number {
-  // Add 1 for a single CPU, or the range length for "a-b".
-  return list.split(',').filter(Boolean).reduce((n, part) => {
-    const [a, b = a] = part.split('-').map(Number);
-    return n + (b - a + 1);
-  }, 0);
-}
-
 // Reads the CPUs that the app and db may use. cAdvisor does not export the cpuset, so the script asks the db container.
 function cpuLimit() {
   try {
@@ -243,6 +236,27 @@ async function main() {
   const range = `${end - start}s`;
   // Fetch every series at a 5 s step over the run window, in parallel.
   const sampled = await Promise.all(SERIES.map((s) => prom('query_range', { query: s.expr, start: String(start), end: String(end), step: String(STEP) })));
+
+  // Each run has its own folder. k6.sh makes it, but an older run exported later may not have one yet.
+  const dir = join(ROOT, 'loadtest/results', testid);
+  // Make the folder, because loadtest/results is not in git.
+  mkdirSync(dir, { recursive: true });
+  // The raw points for the report charts: series name, then label key, then [seconds from start, value] pairs.
+  const raw: Record<string, { unit: string; values: Record<string, [number, number][]> }> = {};
+  // Reuse the samples fetched above, so this needs no extra Prometheus queries.
+  SERIES.forEach((s, i) => {
+    // Keep the unit, so the report can label the axis.
+    raw[s.name] = { unit: s.unit, values: {} };
+    // One point list per label value, with the time relative to the window start like the timeline.
+    for (const r of sampled[i]) raw[s.name].values[labelKey(r.metric)] = (r.values ?? []).map(([t, v]) => [t - start, Number(Number(v).toPrecision(4))]);
+  });
+  // The window start lets the report line up these points with the k6 CSV, which has Unix times.
+  writeFileSync(join(dir, 'prom-series.json'), JSON.stringify({ testid, start, end, step_s: STEP, series: raw }) + '\n');
+  // --series-only needs nothing else. Stop before the totals, top queries, psql, and docker exec calls below.
+  if (seriesOnly) {
+    console.log(`Saved ${join(dir, 'prom-series.json')}`);
+    return;
+  }
 
   // Whole-run average and max for each series and label.
   const overall: Record<string, { unit: string; values: Record<string, unknown> }> = {};
@@ -359,26 +373,11 @@ async function main() {
     timeline,
   };
 
-  // Each run has its own folder. k6.sh makes it, but an older run exported later may not have one yet.
-  const dir = join(ROOT, 'loadtest/results', testid);
-  // Make the folder, because loadtest/results is not in git.
-  mkdirSync(dir, { recursive: true });
   // Save next to the k6 summary in the run folder.
   const file = join(dir, 'prom.json');
-  // Indent the JSON, so it is easy to read and to diff between runs. Skip it with --series-only.
-  if (!seriesOnly) writeFileSync(file, JSON.stringify(result, null, 2) + '\n');
+  // Indent the JSON, so it is easy to read and to diff between runs.
+  writeFileSync(file, JSON.stringify(result, null, 2) + '\n');
 
-  // The raw points for the report charts: series name, then label key, then [seconds from start, value] pairs.
-  const raw: Record<string, { unit: string; values: Record<string, [number, number][]> }> = {};
-  // Reuse the samples fetched above, so this needs no extra Prometheus queries.
-  SERIES.forEach((s, i) => {
-    // Keep the unit, so the report can label the axis.
-    raw[s.name] = { unit: s.unit, values: {} };
-    // One point list per label value, with the time relative to the window start like the timeline.
-    for (const r of sampled[i]) raw[s.name].values[labelKey(r.metric)] = (r.values ?? []).map(([t, v]) => [t - start, Number(Number(v).toPrecision(4))]);
-  });
-  // The window start lets the report line up these points with the k6 CSV, which has Unix times.
-  writeFileSync(join(dir, 'prom-series.json'), JSON.stringify({ testid, start, end, step_s: STEP, series: raw }) + '\n');
 
   // Print a short table, so the main numbers show in the terminal after a run.
   const n = (x: unknown, d = 0) => (x === undefined ? '-' : (x as { avg: number }).avg.toFixed(d));
@@ -394,7 +393,7 @@ async function main() {
   // Show where the knee is, or that there was none.
   console.log(kneeRow ? `Knee: p95 over ${P95_LIMIT_MS} ms from ${kneeRow.from_s} s` : `No bucket with p95 over ${P95_LIMIT_MS} ms`);
   // Show where the files are.
-  console.log(seriesOnly ? `Saved ${join(dir, 'prom-series.json')}` : `Saved ${file} and prom-series.json`);
+  console.log(`Saved ${file} and prom-series.json`);
 }
 
 // Run, and exit with code 1 on any error, so k6.sh can report it.

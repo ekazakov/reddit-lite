@@ -81,6 +81,8 @@ async function loadRun(id: string) {
   if (!existsSync(dir)) throw new Error(`No run folder ${relative(ROOT, dir)}`);
   const meta = readJson(join(dir, 'meta.json'));
   const prom = readJson(join(dir, 'prom.json'));
+  // Built from k6.csv.gz on first use and cached. null for runs without a CSV.
+  const ts = await buildTimeSeries(id);
   // The 30 s timeline is a copy of data that prom-series.json has at 5 s. Drop it to keep the page small.
   if (prom) delete prom.timeline;
   return {
@@ -91,8 +93,9 @@ async function loadRun(id: string) {
     summary: readJson(join(dir, 'summary.json')),
     prom,
     promSeries: readJson(join(dir, 'prom-series.json')),
-    // Built from k6.csv.gz on first use and cached. null for runs without a CSV.
-    ts: await buildTimeSeries(id),
+    // A CSV with a header only (k6 stopped before the first sample) counts as no CSV. Its start of 0 would
+    // otherwise become the time origin, and the Prometheus lines would move by the whole Unix time.
+    ts: ts && ts.s1.length > 0 ? ts : null,
   };
 }
 
