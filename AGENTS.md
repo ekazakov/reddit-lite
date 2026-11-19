@@ -18,6 +18,8 @@ Stack: Node.js 24 or newer, pnpm, Hono, TypeScript, Postgres, vanilla JavaScript
 - Run the dev server: `pnpm dev` (opens on http://localhost:3000)
 - Check types: `pnpm typecheck`
 - Run tests: `pnpm test`
+- Audit runtime dependencies: `pnpm security:audit`
+- Scan images and files with Trivy: `pnpm security:scan`
 
 The tests in `test/app.test.ts` reset the `public` schema of the database in `DATABASE_URL`. Point `DATABASE_URL` at a throwaway database before you run them.
 
@@ -33,6 +35,7 @@ The tests in `test/app.test.ts` reset the `public` schema of the database in `DA
 - `scripts/`: seed script and load test helpers.
 - `loadtest/`: k6 load tests.
 - `infra/`, `deploy/`: Ansible and deployment files.
+- `scripts/security/`, `.github/workflows/`, `renovate.json5`, `.trivyignore`: security scans, CI, and automatic updates.
 
 ## Conventions
 
@@ -50,6 +53,11 @@ When you write or change files for DevOps, infrastructure, or load testing, add 
 - Docker and Compose files
 - Shell scripts in `scripts/loadtest/`
 - k6 tests in `loadtest/`
+- Security scripts in `scripts/security/`
+- GitHub Actions workflows in `.github/workflows/`
+- The Renovate configuration in `renovate.json5`
+
+Keep the security settings in `pnpm-workspace.yaml` explicit, including the ones that repeat a pnpm default. Do not remove them as redundant.
 
 ## Known limits
 

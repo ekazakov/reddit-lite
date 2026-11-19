@@ -1,4 +1,135 @@
-minimumReleaseAgeExclude:
-  - '@hono/node-server@2.1.7'
-  - hono@4.13.18
-  - postgres@4.1.1
+# pnpm supply-chain security configuration.
+#
+# This file lists every security setting, including the ones that only repeat a
+# pnpm 12 default. The defaults are explicit on purpose: a reviewer can check the
+# whole configuration here, and a future pnpm release or a CLI flag cannot turn a
+# protection off without a visible diff. Do not delete them as "redundant".
+# The reasons for each setting are in plan/SECURITY-PLAN.md.
+
+# --- Release age ---------------------------------------------------------------
+
+# Do not resolve a version until it is 7 days (10080 minutes) old. Most hijacked
+# releases are found and removed within that time.
+# Changed from default (1440, one day).
+minimumReleaseAge: 10080
+
+# Fail the install when no version in the range is old enough, instead of quietly
+# falling back to a version that is too new.
+# pnpm 12 default when minimumReleaseAge is set.
+minimumReleaseAgeStrict: true
+
+# Emergency bypass for the release-age delay. When an urgent CVE fix is younger
+# than 7 days, add its exact version here (for example `hono@4.13.20`), with a
+# comment that gives the CVE and the date to remove the entry. Remove the entry
+# once the version is past the 7-day window.
+# Changed from default (no entries, but the old file excluded all three direct dependencies).
+minimumReleaseAgeExclude: []
+
+# --- Trust and sources ---------------------------------------------------------
+
+# Fail if a new version has weaker publish trust than older versions, for example
+# no CI provenance where earlier versions had it. That is a typical sign of a
+# stolen maintainer token.
+# pnpm 12 default.
+trustPolicy: no-downgrade
+
+# Check every lockfile entry against minimumReleaseAge and trustPolicy again on
+# each install, so a PR with a poisoned lockfile fails.
+# pnpm 12 default.
+trustLockfile: false
+
+# Transitive dependencies resolve only from the registry, never from git or
+# tarball URLs.
+# pnpm 12 default.
+blockExoticSubdeps: true
+
+# --- Build scripts -------------------------------------------------------------
+
+# Fail the install if a dependency has a build script (postinstall and similar)
+# that is not in allowBuilds. Install scripts are the usual way a compromised
+# package runs code.
+# pnpm 12 default.
+strictDepBuilds: true
+
+# Allow list for dependency build scripts. None of our dependencies need one, so
+# the list is empty and any new build script stops the install for review.
+# Add an entry as `package-name: true` only after you read the script.
+# Changed from default (not set).
+allowBuilds: {}
+
+# Never run every build script without review.
+# pnpm 12 default.
+dangerouslyAllowAllBuilds: false
+
+# --- Store and network ---------------------------------------------------------
+
+# Check the content of store files before pnpm links them into node_modules.
+# This catches store corruption.
+# pnpm 12 default.
+verifyStoreIntegrity: true
+
+# The name and version inside a package must match the lockfile entry.
+# pnpm 12 default.
+strictStorePkgContentCheck: true
+
+# Validate the registry TLS certificate, so a man-in-the-middle proxy cannot
+# serve fake packages.
+# pnpm 12 default.
+strictSsl: true
+
+# --- Versions and engines ------------------------------------------------------
+
+# `pnpm add` writes exact versions (4.13.18, not ^4.13.18), so package.json shows
+# what runs and every update is a visible PR.
+# Changed from default (false).
+saveExact: true
+
+# Refuse to install on a Node version outside engines.node in package.json.
+# Changed from default (false).
+engineStrict: true
+
+# Scripts such as `pnpm dev` and `pnpm test` fail if node_modules does not match
+# the lockfile, so you never run dependencies that nobody reviewed.
+# Changed from default (install).
+verifyDepsBeforeRun: error
+
+# --- node_modules layout -------------------------------------------------------
+
+# Each package sees only the dependencies it declares, through symlinks.
+# pnpm 12 default.
+nodeLinker: isolated
+
+# Keep the virtual store inside this project (node_modules/.pnpm). A global store
+# is shared by every project on the machine, and its links break when the Docker
+# final stage copies node_modules from the build stage.
+# pnpm 12 default.
+virtualStoreType: project
+
+# Do not hoist packages into node_modules/.pnpm/node_modules, so no package can
+# load a dependency that it does not declare.
+# Changed from default (true).
+hoist: false
+
+# --- Hooks and agent skills ----------------------------------------------------
+
+# Load no .pnpmfile hooks. A hook runs on every install and can rewrite any
+# dependency, so a PR that adds a .pnpmfile has no effect.
+# Changed from default (.pnpmfile.mjs and .pnpmfile.cjs).
+pnpmfile: []
+
+skills:
+  # Link no agent skills from dependencies. Skills become instructions for AI
+  # agents in this repository, so a malicious package could use them for prompt
+  # injection.
+  # Changed from default (detected agent skill folders).
+  dirs: []
+
+# --- Audit ---------------------------------------------------------------------
+
+audit:
+  # `pnpm audit` reports and fails only for high and critical advisories.
+  # Changed from default (low).
+  level: high
+  # GHSA ids to tolerate. Each entry needs a comment with the reason and a review date.
+  # pnpm 12 default (empty).
+  ignore: []

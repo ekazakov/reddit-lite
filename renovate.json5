@@ -1,0 +1,109 @@
+// Renovate opens pull requests that update npm packages, Docker images, and GitHub Actions.
+// Safe updates merge automatically after CI passes. Risky ones wait for a person.
+// The full reasoning is in plan/SECURITY-PLAN.md.
+{
+  // Lets editors check this file against the Renovate schema.
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    // Renovate's recommended base: dependency dashboard issue, monorepo grouping, sensible defaults.
+    "config:recommended",
+    // Add @sha256 digests to Docker image references and keep them current, so a moved tag cannot change what we run.
+    "docker:pinDigests",
+    // Pin GitHub Actions to commit SHAs with a version comment, so a moved tag cannot change what CI runs.
+    "helpers:pinGitHubActionDigests",
+  ],
+
+  // Read schedule times in UTC, the same zone as the weekly security scan.
+  timezone: "UTC",
+  // Open normal update PRs on Monday from 06:00 to 11:59 UTC, after the 05:00 security scan. Security fixes ignore this window.
+  schedule: ["* 6-11 * * 1"],
+
+  // Merge through GitHub's own auto-merge, so the merge waits for the required checks of branch protection.
+  platformAutomerge: true,
+
+  // Get vulnerability data from osv.dev, so security PRs work without GitHub Dependabot alerts.
+  osvVulnerabilityAlerts: true,
+  // Settings for PRs that fix a known vulnerability. They skip the schedule above.
+  // Urgent CVE process: pnpm still refuses versions younger than 7 days. If this PR fails on minimumReleaseAge,
+  // add the exact fixed version to minimumReleaseAgeExclude in pnpm-workspace.yaml in this PR, with the CVE and a removal date.
+  vulnerabilityAlerts: {
+    // Label the PR, so security fixes are easy to find and review first.
+    labels: ["security"],
+  },
+
+  // Refresh the whole lockfile once a week. This is how fixes for transitive dependencies arrive.
+  lockFileMaintenance: {
+    // Turn the weekly lockfile refresh on.
+    enabled: true,
+    // Merge it automatically after CI passes. pnpm still applies the 7-day release age to every new version.
+    automerge: true,
+  },
+
+  packageRules: [
+    {
+      // All npm packages.
+      matchDatasources: ["npm"],
+      // Wait 7 days after a release, the same as minimumReleaseAge in pnpm-workspace.yaml. A shorter wait gives failing lockfile updates.
+      minimumReleaseAge: "7 days",
+      // Write exact versions in package.json, the same as saveExact in pnpm-workspace.yaml.
+      rangeStrategy: "pin",
+    },
+    {
+      // Patch and minor npm updates usually keep the API, so CI is enough review for them.
+      matchDatasources: ["npm"],
+      matchUpdateTypes: ["patch", "minor"],
+      // Merge after CI passes.
+      automerge: true,
+    },
+    {
+      // Digest updates keep the same tag and usually carry OS security fixes. Pin updates only add a digest.
+      matchUpdateTypes: ["digest", "pin", "pinDigest"],
+      // Merge after CI passes, because these are the main way image vulnerabilities get fixed.
+      automerge: true,
+    },
+    {
+      // All GitHub Actions.
+      matchManagers: ["github-actions"],
+      // One PR for all Actions, so CI updates arrive together.
+      groupName: "GitHub Actions",
+      // Merge non-major Action updates after CI passes.
+      matchUpdateTypes: ["patch", "minor", "digest", "pinDigest"],
+      automerge: true,
+    },
+    {
+      // The load test images run only on a developer machine, never in production.
+      matchFileNames: ["docker-compose.loadtest.yml"],
+      // One PR for the whole load test stack, so the images stay compatible with each other.
+      groupName: "load test images",
+    },
+    {
+      // Non-major load test image updates are low risk, so they merge after CI passes.
+      matchFileNames: ["docker-compose.loadtest.yml"],
+      matchUpdateTypes: ["patch", "minor", "digest", "pinDigest"],
+      automerge: true,
+    },
+    {
+      // Postgres major versions (17 to 18) change the data file format and need a dump and restore.
+      matchDatasources: ["docker"],
+      matchPackageNames: ["postgres"],
+      matchUpdateTypes: ["major"],
+      // Never merge these automatically. A person plans the data migration.
+      automerge: false,
+      // Mark the PR, so it gets a careful review.
+      labels: ["needs-migration"],
+    },
+    {
+      // The pnpm version in "packageManager". A new pnpm can change install behavior and security defaults.
+      matchDepTypes: ["packageManager"],
+      // Read the pnpm changelog before merging.
+      automerge: false,
+    },
+    {
+      // Major updates of any kind can break the API, so a person reviews them.
+      matchUpdateTypes: ["major"],
+      // This rule comes last, so it overrides the automerge rules above.
+      automerge: false,
+    },
+  ],
+}

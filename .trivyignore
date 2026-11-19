@@ -1,0 +1,8 @@
+# Findings that Trivy must not report. Used by scripts/security/scan.sh and the CI workflows.
+# Add an entry only when no fix exists or the code path is not used, never to make CI green.
+# Each entry needs a comment line above it with the reason and an expiry date, for example:
+#
+#   # Not reachable: we do not use the affected feature. Review on 2027-01-31.
+#   CVE-2026-12345
+#
+# Delete the entry on its expiry date and run `pnpm security:scan` again.

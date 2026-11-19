@@ -1,0 +1,112 @@
+# Checks every pull request and every push to main: types, tests, dependency audit, and an image vulnerability gate.
+# Renovate auto-merges an update only after these jobs pass, so they are the safety net for automatic updates.
+name: CI
+
+# Run for pull requests (including Renovate PRs) and for pushes to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel an older run of the same branch when a new commit arrives, so CI does not waste time on stale code.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Give the workflow token read-only access by default. A job asks for more only when it needs it.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # A GitHub-hosted Linux runner with Docker, which the Postgres service container needs.
+    runs-on: ubuntu-latest
+    # Stop a hung job after 15 minutes, so it does not use runner minutes for hours.
+    timeout-minutes: 15
+    services:
+      # A throwaway Postgres for the tests. The tests reset the public schema, which is safe here.
+      postgres:
+        # The same image and digest as docker-compose.yml, so CI tests against the database version we run.
+        image: postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
+        env:
+          # Password and database name that match DATABASE_URL below.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reddit_lite
+        # Publish the port on the runner, so the job steps reach the database on localhost.
+        ports:
+          - 5432:5432
+        # Wait until Postgres accepts connections before the steps start.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d reddit_lite"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # The connection string for the service container above.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/reddit_lite
+    steps:
+      # Get the repository code. persist-credentials false keeps the token out of .git/config, so later steps cannot reuse it.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Install pnpm. With no version input, it reads the exact version from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      # Install Node 26, the same major version as the Dockerfile base image. Cache the pnpm store to speed up installs.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: pnpm
+      # Install from the reviewed lockfile only. pnpm-workspace.yaml applies the release-age and trust checks here too.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Check the TypeScript types without emitting files.
+      - name: Typecheck
+        run: pnpm typecheck
+      # Apply the SQL migrations to the service database, as the app does on start.
+      - name: Apply migrations
+        run: pnpm migrate
+      # Run the Node test runner suite against the service database.
+      - name: Test
+        run: pnpm test
+      # Fail on high or critical advisories in the runtime dependencies (audit.level in pnpm-workspace.yaml).
+      - name: Audit production dependencies
+        run: pnpm security:audit
+
+  image:
+    # A GitHub-hosted Linux runner with Docker for the image build.
+    runs-on: ubuntu-latest
+    # Stop a hung build or scan after 20 minutes.
+    timeout-minutes: 20
+    steps:
+      # Get the repository code without saving the token in .git/config.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Set up Buildx, which build-push-action needs to build and load the image.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Build the app image and load it into the local Docker engine for the scan. Nothing is pushed to a registry.
+      - name: Build app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: reddit-lite:ci
+      # The gate: fail when the image has a HIGH or CRITICAL vulnerability that has a fix.
+      # Unfixed findings do not fail the job, because no update exists that could remove them.
+      - name: Scan app image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          # Pin the Trivy version. The action default is older than the version that scripts/security/scan.sh uses.
+          version: v0.76.2
+          image-ref: reddit-lite:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          format: table
+          exit-code: "1"

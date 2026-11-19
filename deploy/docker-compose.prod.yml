@@ -2,7 +2,8 @@
 services:
   db:
     # Alpine variant: a small image, so the pull is fast and the disk use is low.
-    image: postgres:17-alpine
+    # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
+    image: postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
     # Start the container again after a crash or a reboot, so the site comes back without a person.
     restart: unless-stopped
     environment:

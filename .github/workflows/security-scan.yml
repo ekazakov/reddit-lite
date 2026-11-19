@@ -1,0 +1,165 @@
+# Weekly security scan. New vulnerabilities are published for images and packages that we did not change,
+# so a scan that runs only on pull requests would miss them. Results go to the repository Security tab.
+name: Security scan
+
+on:
+  # Every Monday at 05:00 UTC, before Renovate's Monday update window, so new findings and fix PRs arrive together.
+  schedule:
+    - cron: "0 5 * * 1"
+  # Allow a manual run from the Actions tab, for example after a big CVE announcement.
+  workflow_dispatch:
+
+# Read-only token by default. The scan jobs add security-events: write to upload results.
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    # A GitHub-hosted Linux runner.
+    runs-on: ubuntu-latest
+    # Stop a hung audit after 10 minutes.
+    timeout-minutes: 10
+    steps:
+      # Get the repository code without saving the token in .git/config.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Install pnpm at the version from "packageManager" in package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      # Install Node 26 to run pnpm.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      # Full audit, including dev dependencies. It reads only the lockfile, so no install is needed.
+      - name: Audit all dependencies
+        run: pnpm audit
+
+  app-image:
+    # A GitHub-hosted Linux runner with Docker for the image build.
+    runs-on: ubuntu-latest
+    # Stop a hung build or scan after 20 minutes.
+    timeout-minutes: 20
+    # Allow the SARIF upload to the Security tab.
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      # Get the repository code without saving the token in .git/config.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Set up Buildx for the image build.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Rebuild the app image on a fresh runner with no layer cache, so `apk upgrade` gets this week's Alpine fixes.
+      # "pull" makes sure that the build uses the pinned base image from the registry, not a stale local copy.
+      - name: Build app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          pull: true
+          tags: reddit-lite:scan
+      # Write every finding as SARIF, so the Security tab shows the full list, including unfixed ones.
+      - name: Scan app image (report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: reddit-lite:scan
+          trivyignores: .trivyignore
+          format: sarif
+          output: trivy-app.sarif
+      # Upload the findings to the Security tab. The category keeps app results apart from the third-party results.
+      - name: Upload app results
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy-app.sarif
+          category: trivy-app-image
+      # The gate, same as CI: fail the run when a HIGH or CRITICAL finding has a fix, so GitHub sends a failure notice.
+      # skip-setup-trivy reuses the Trivy that the previous scan step installed.
+      - name: Scan app image (gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          skip-setup-trivy: true
+          image-ref: reddit-lite:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          format: table
+          exit-code: "1"
+
+  list-images:
+    # A GitHub-hosted Linux runner.
+    runs-on: ubuntu-latest
+    # Stop after 5 minutes. The job only reads files.
+    timeout-minutes: 5
+    # Pass the image list to the scan job below.
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      # Get the compose files without saving the token in .git/config.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Read the third-party images from the compose files, the same way as scripts/security/scan.sh.
+      # The compose files are the only list, so a Renovate bump there also changes what this scan checks.
+      # jq turns the lines into a JSON array for the matrix below.
+      - name: List images from compose files
+        id: list
+        run: |
+          images=$(grep -h -E '^[[:space:]]*image:' docker-compose.yml docker-compose.loadtest.yml deploy/docker-compose.prod.yml \
+            | awk '{print $2}' | grep -v '^reddit-lite' | sort -u | jq -R . | jq -cs .)
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
+  third-party-images:
+    # Start after the image list is ready.
+    needs: list-images
+    # A GitHub-hosted Linux runner. Trivy pulls each image from its registry.
+    runs-on: ubuntu-latest
+    # Stop a hung scan after 20 minutes.
+    timeout-minutes: 20
+    # Allow the SARIF upload to the Security tab.
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      # Scan every image even if one scan step fails.
+      fail-fast: false
+      matrix:
+        # One matrix entry per image from the list-images job.
+        image: ${{ fromJSON(needs.list-images.outputs.images) }}
+    steps:
+      # Get .trivyignore from the repository without saving the token in .git/config.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Report only: we cannot patch upstream images, only bump their tags. The fix is a Renovate PR, so this step never fails the run.
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: ${{ matrix.image }}
+          trivyignores: .trivyignore
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+      # Make a short, safe category name from the image name (letters, digits, and dashes), so each image gets its own entry.
+      - name: Make result category
+        id: category
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: echo "name=trivy-$(echo "${IMAGE%%@*}" | tr -c 'a-zA-Z0-9\n' '-')" >> "$GITHUB_OUTPUT"
+      # Upload the findings to the Security tab under the image's own category.
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy.sarif
+          category: ${{ steps.category.outputs.name }}

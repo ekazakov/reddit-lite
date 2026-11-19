@@ -21,16 +21,18 @@
     "loadtest:stairs": "sh scripts/loadtest/k6.sh stairs",
     "loadtest:soak": "sh scripts/loadtest/k6.sh soak",
     "loadtest:spike": "sh scripts/loadtest/k6.sh spike",
-    "loadtest:prom": "node scripts/loadtest/prom-summary.ts"
+    "loadtest:prom": "node scripts/loadtest/prom-summary.ts",
+    "security:audit": "pnpm audit --prod",
+    "security:scan": "sh scripts/security/scan.sh"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.7",
-    "hono": "^4.13.18",
-    "postgres": "^4.1.1"
+    "@hono/node-server": "2.1.7",
+    "hono": "4.13.18",
+    "postgres": "4.1.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
-    "typescript": "^7.0.2"
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
   },
   "packageManager": "pnpm@12.18.0"
 }
