@@ -104,7 +104,7 @@ The shared code is in `loadtest/k6/lib.js`:
 - Each POST uses `redirects: 0`, so k6 measures the write alone and not the page after the redirect.
 - Each request has an `action` tag. The dashboards group the latency by this tag.
 
-`scripts/loadtest/k6.sh` runs a script in the k6 container. It tags all metrics of the run with `testid=<script>-<time>`, sends them to Prometheus, and saves a summary to `loadtest/results/<script>-<time>.json`.
+`scripts/loadtest/k6.sh` runs a script in the k6 container. It tags all metrics of the run with `testid=<script>-<time>`, and sends them to Prometheus. It saves all files of the run in the folder `loadtest/results/<script>-<time>/`: the k6 summary, every k6 sample as `k6.csv.gz`, and `meta.json`. The file `meta.json` records what ran and the real app and db configuration.
 
 ### Prometheus, the exporters, and Grafana
 
@@ -246,7 +246,14 @@ This soak test runs at 70 requests per second for 30 minutes:
 pnpm loadtest:soak -e RATE=70 -e DURATION=30m
 ```
 
-When a run ends, k6 prints a summary in the terminal. It also saves the summary to `loadtest/results/<script>-<time>.json`. Then `scripts/loadtest/prom-summary.ts` reads the run from Prometheus and saves the db, CPU, and memory numbers to `loadtest/results/<script>-<time>-prom.json`. A threshold failure does not stop the run, because the thresholds use `abortOnFail: false`. The staircase test must go past the failure point to show what happens there.
+When a run ends, k6 prints a summary in the terminal. The run folder `loadtest/results/<script>-<time>/` then fills in this order:
+
+1. k6 writes `summary.json` and `k6.csv.gz`.
+2. `scripts/loadtest/run-meta.ts` adds the end time, the exit code, and the container state after the run to `meta.json`.
+3. `scripts/loadtest/prom-summary.ts` reads the run from Prometheus. It saves the db, CPU, and memory numbers to `prom.json`, and the raw 5 s points to `prom-series.json`.
+4. `scripts/loadtest/report.ts` turns `k6.csv.gz` into `timeseries.json` and builds `report.html`.
+
+A threshold failure does not stop the run, because the thresholds use `abortOnFail: false`. The staircase test must go past the failure point to show what happens there.
 
 ### Stop the stack
 

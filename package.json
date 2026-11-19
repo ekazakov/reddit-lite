@@ -21,7 +21,11 @@
     "loadtest:stairs": "sh scripts/loadtest/k6.sh stairs",
     "loadtest:soak": "sh scripts/loadtest/k6.sh soak",
     "loadtest:spike": "sh scripts/loadtest/k6.sh spike",
-    "loadtest:prom": "node scripts/loadtest/prom-summary.ts"
+    "loadtest:prom": "node scripts/loadtest/prom-summary.ts",
+    "loadtest:report": "node scripts/loadtest/report.ts",
+    "loadtest:timeseries": "node scripts/loadtest/k6-timeseries.ts",
+    "loadtest:matrix": "sh scripts/loadtest/matrix.sh",
+    "loadtest:migrate-results": "sh scripts/loadtest/migrate-results.sh"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.7",
@@ -30,7 +34,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "uplot": "^1.6.32"
   },
   "packageManager": "pnpm@12.18.0"
 }
