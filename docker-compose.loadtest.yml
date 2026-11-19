@@ -59,7 +59,7 @@ services:
   prometheus:
     # Pin the version, so a new release cannot change the results.
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     # Keep off the app and db cores, so metric storage takes no CPU from the system under test.
     cpuset: ${TOOLS_CPUSET:-2-5}
     command:
@@ -82,7 +82,7 @@ services:
   grafana:
     # Pin the version, so the dashboard JSON keeps working.
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+    image: grafana/grafana:12.4.15@sha256:2894082f6cf7081aefdc1389265c04000812309208c190d75e8c65f7a30e4b7e
     # Keep off the app and db cores, so dashboard queries take no CPU from the system under test.
     cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
@@ -107,7 +107,7 @@ services:
   # Turns Postgres statistics into Prometheus metrics.
   postgres-exporter:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: prometheuscommunity/postgres-exporter:v0.17.1@sha256:38606faa38c54787525fb0ff2fd6b41b4cfb75d455c1df294927c5f611699b17
+    image: prometheuscommunity/postgres-exporter:v0.21.1@sha256:3b8e05a84282cd1199ad2fb6c66f362738bf4c68c1547d8f4226a34a7dd6d8d7
     # Keep the exporter process off the db cores. Its SQL queries still run inside the db container.
     cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
@@ -124,7 +124,7 @@ services:
   # Reports CPU and memory use of the app and db containers.
   cadvisor:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: gcr.io/cadvisor/cadvisor:v0.52.1@sha256:f40e65878e25c2e78ea037f73a449527a0fb994e303dc3e34cb6b187b4b91435
+    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     # Keep off the app and db cores, so reading statistics takes no CPU from the system under test.
     cpuset: ${TOOLS_CPUSET:-2-5}
     # cAdvisor needs wide access to the host to read container statistics.
@@ -159,7 +159,7 @@ services:
   # The load generator. It runs only on request, through the "k6" profile.
   k6:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+    image: grafana/k6:1.8.3@sha256:2cd9cd09e4119340a122aaf06f30cf3009c19db23b87954909fba0d3eda58e08
     # Keep the load generator off the app and db cores. Thousands of VUs need a lot of CPU.
     cpuset: ${TOOLS_CPUSET:-2-5}
     # Do not start k6 with "up". scripts/loadtest/k6.sh starts it with "run".
