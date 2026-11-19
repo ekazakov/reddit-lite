@@ -82,7 +82,7 @@ services:
   grafana:
     # Pin the version, so the dashboard JSON keeps working.
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: grafana/grafana:12.4.15@sha256:2894082f6cf7081aefdc1389265c04000812309208c190d75e8c65f7a30e4b7e
+    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     # Keep off the app and db cores, so dashboard queries take no CPU from the system under test.
     cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
@@ -159,7 +159,7 @@ services:
   # The load generator. It runs only on request, through the "k6" profile.
   k6:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: grafana/k6:1.8.3@sha256:2cd9cd09e4119340a122aaf06f30cf3009c19db23b87954909fba0d3eda58e08
+    image: grafana/k6:2.4.0@sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276
     # Keep the load generator off the app and db cores. Thousands of VUs need a lot of CPU.
     cpuset: ${TOOLS_CPUSET:-2-5}
     # Do not start k6 with "up". scripts/loadtest/k6.sh starts it with "run".
