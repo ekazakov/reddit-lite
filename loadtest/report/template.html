@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!-- Template for scripts/loadtest/report.ts. The script replaces each placeholder comment with inline content. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><!--TITLE--></title>
+  <!-- uPlot styles, from the uplot devDependency. -->
+  <style>/*UPLOT_CSS*/</style>
+  <!-- Report styles, from loadtest/report/report.css. -->
+  <style>/*REPORT_CSS*/</style>
+</head>
+<body>
+  <!-- report.js fills this element. -->
+  <main id="app"><p>Loading…</p></main>
+  <!-- All run data as JSON. report.js reads it with JSON.parse. -->
+  <script id="data" type="application/json">/*DATA*/</script>
+  <!-- uPlot, from the uplot devDependency. It defines the global uPlot. -->
+  <script>/*UPLOT_JS*/</script>
+  <!-- The report code, from loadtest/report/report.js. -->
+  <script>/*REPORT_JS*/</script>
+</body>
+</html>

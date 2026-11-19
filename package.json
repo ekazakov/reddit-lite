@@ -22,6 +22,11 @@
     "loadtest:soak": "sh scripts/loadtest/k6.sh soak",
     "loadtest:spike": "sh scripts/loadtest/k6.sh spike",
     "loadtest:prom": "node scripts/loadtest/prom-summary.ts",
+    "loadtest:report": "node scripts/loadtest/report.ts",
+    "loadtest:timeseries": "node scripts/loadtest/k6-timeseries.ts",
+    "loadtest:matrix": "sh scripts/loadtest/matrix.sh",
+    "loadtest:migrate-results": "sh scripts/loadtest/migrate-results.sh",
+    "loadtest:prom": "node scripts/loadtest/prom-summary.ts",
     "security:audit": "pnpm audit --prod",
     "security:scan": "sh scripts/security/scan.sh"
   },
@@ -31,8 +36,9 @@
     "postgres": "4.1.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.6",
-    "typescript": "7.0.2"
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "uplot": "^1.6.32"
   },
   "packageManager": "pnpm@12.20.0"
 }

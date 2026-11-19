@@ -186,11 +186,14 @@ importers:
         version: 4.1.1
     devDependencies:
       '@types/node':
-        specifier: 26.6.6
+        specifier: ^26.6.6
         version: 26.6.6
       typescript:
-        specifier: 7.0.2
+        specifier: ^7.0.2
         version: 7.0.2
+      uplot:
+        specifier: ^1.6.32
+        version: 1.6.32
 
 packages:
 
@@ -339,6 +342,9 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
+  uplot@1.6.32:
+    resolution: {integrity: sha512-KIMVnG68zvu5XXUbC4LQEPnhwOxBuLyW1AHtpm6IKTXImkbLgkMy+jabjLgSLMasNuGGzQm/ep3tOkyTxpiQIw==}
+
 snapshots:
 
   '@hono/node-server@2.1.8(hono@4.13.18)':
@@ -437,3 +443,5 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   undici-types@8.9.0: {}
+
+  uplot@1.6.32: {}
