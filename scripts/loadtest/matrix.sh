@@ -94,6 +94,8 @@ check_variant() {
     if [ "$ncpu" -gt 0 ] && [ "$c" -ge "$ncpu" ]; then echo "SUT_CPUSET=$SUT_CPUSET uses CPU $c, but Docker has $ncpu CPUs"; return 1; fi
   done
   # Postgres allows 100 connections by default. The exporter and psql sessions need some of them.
+  # A value that is not a positive whole number makes "[ -gt ]" fail with status 2, which would count as a pass.
+  case "$DB_POOL_MAX" in ''|*[!0-9]*|0) echo "DB_POOL_MAX=$DB_POOL_MAX is not a positive whole number"; return 1 ;; esac
   if [ "$DB_POOL_MAX" -gt 90 ]; then echo "DB_POOL_MAX=$DB_POOL_MAX is over 90, too close to max_connections=100"; return 1; fi
   return 0  # All checks passed.
 }

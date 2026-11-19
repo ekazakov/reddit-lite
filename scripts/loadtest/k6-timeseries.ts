@@ -91,6 +91,9 @@ function actionOf(extraTags: string): string | null {
   return extraTags ? new URLSearchParams(extraTags).get('action') : null;
 }
 
+// The metrics that Aggregator.add() reads. All other rows are skipped.
+const USED = new Set(['iterations', 'dropped_iterations', 'http_reqs', 'http_req_failed', 'vus', 'http_req_duration']);
+
 // Collects rows and builds the buckets. Exported for the test.
 export class Aggregator {
   // The column index of each header name.
@@ -116,7 +119,9 @@ export class Aggregator {
 
   // Adds one data line.
   add(line: string) {
-    // Most lines are metrics this script does not need. Check the name first, so they cost little.
+    // Most lines are metrics this script does not need. k6 writes the name first, and a name has no comma,
+    // so the text before the first comma is enough to skip a line before the full parse.
+    if (this.col.metric_name === 0 && !USED.has(line.slice(0, line.indexOf(',')))) return;
     const f = parseCsvLine(line);
     const name = f[this.col.metric_name];
     // k6 writes Unix seconds by default. Math.floor also handles a time format with fractions.
@@ -262,7 +267,8 @@ export async function buildTimeSeries(testid: string, force = false): Promise<Ti
 }
 
 // Run as a script: build the file for one run and print a short line.
-if (import.meta.main) {
+// import.meta.main needs Node 24.2, so compare the started script with this file. That works on every Node 24.
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const testid = process.argv[2];
   if (!testid) {
     console.error('Usage: node scripts/loadtest/k6-timeseries.ts <testid> [--force]');

@@ -139,7 +139,7 @@ The page has these parts:
 - Against offered rate: one point per 10 s bucket, with the offered rate on the x axis. Runs with different `STEPS` compare directly here. The rate where the p95 points leave the bottom is the knee.
 - Slowest queries and checks.
 
-The summary row "Max sustained rate" is the highest 10 s offered rate that stays in the limits. The limits are p95 at or under 500 ms, no dropped iterations, and under 1% errors. Use it as the capacity of a configuration.
+The summary row "Max sustained rate" is the highest offered rate that stays in the limits for 30 s, which is 3 buckets of 10 s in a row. The limits are p95 at or under 500 ms, no dropped iterations, and under 1% errors. Use it as the capacity of a configuration.
 
 ## Compare configurations
 
