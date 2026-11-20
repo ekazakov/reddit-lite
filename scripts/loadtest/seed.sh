@@ -2,7 +2,7 @@
 # Loads mock data into the load test database, exports CSV files for k6,
 # and saves a snapshot for restore.sh.
 # Usage: scripts/loadtest/seed.sh [S|default|L]
-# WARNING: this script deletes all rows in the app tables of the local Docker database.
+# WARNING: this script deletes all rows in the app tables of the load test database (Compose project reddit-lite-loadtest).
 
 # Stop on any error or unset variable.
 set -eu

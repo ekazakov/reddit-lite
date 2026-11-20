@@ -31,19 +31,22 @@ jobs:
         env:
           # Password and database name that match DATABASE_URL below.
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: reddit_lite
+          # The name ends with _test, because the guard in test/app.test.ts refuses any other name.
+          POSTGRES_DB: reddit_lite_test
         # Publish the port on the runner, so the job steps reach the database on localhost.
         ports:
           - 5432:5432
         # Wait until Postgres accepts connections before the steps start.
         options: >-
-          --health-cmd "pg_isready -U postgres -d reddit_lite"
+          --health-cmd "pg_isready -U postgres -d reddit_lite_test"
           --health-interval 3s
           --health-timeout 3s
           --health-retries 20
     env:
-      # The connection string for the service container above.
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/reddit_lite
+      # The connection string for the service container above. pnpm migrate reads it.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/reddit_lite_test
+      # The same database for pnpm test. The test script reads TEST_DATABASE_URL, not DATABASE_URL.
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/reddit_lite_test
     steps:
       # Get the repository code. persist-credentials false keeps the token out of .git/config, so later steps cannot reuse it.
       - name: Check out code

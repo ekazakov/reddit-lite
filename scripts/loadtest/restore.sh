@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Restores the snapshot from seed.sh, so each test run starts with the same data.
-# WARNING: this script replaces all data in the local Docker database.
+# WARNING: this script replaces all data in the load test database (Compose project reddit-lite-loadtest).
 
 # Stop on any error or unset variable.
 set -eu

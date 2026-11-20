@@ -1,5 +1,6 @@
-# Load test overlay. Use it together with docker-compose.yml:
-#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# Load test overlay. Use it together with docker-compose.yml, in its own project, so it does not share the development pgdata volume:
+#   docker compose -p reddit-lite-loadtest -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# scripts/loadtest/compose.sh runs this command for you.
 # The app and db limits match a 2 vCPU / 2 GB droplet. Change them in loadtest/.env
 # (copy loadtest/.env.example) and pass --env-file loadtest/.env.
 # CPU split: app and db share the cores in SUT_CPUSET, as they share the vCPUs of the one
@@ -10,6 +11,11 @@ services:
   db:
     # A fixed cgroup path lets cAdvisor find this container (see the cadvisor service).
     cgroup_parent: /loadtest-db
+    # Replace the host port 5432 from docker-compose.yml with 5433, so this stack can run next to the development db.
+    # !override replaces the list. Without it, Compose merges both lists and the two stacks fight for port 5432.
+    ports: !override
+      # psql from the host: psql -h localhost -p 5433 -U postgres reddit_lite
+      - "5433:5432"
     # Run only on the droplet cores, shared with the app, so results predict production.
     # cpuset sets where the processes run, not a time quota, so there are no throttling pauses.
     cpuset: ${SUT_CPUSET:-0-1}
@@ -38,6 +44,11 @@ services:
   app:
     # A fixed cgroup path lets cAdvisor find this container.
     cgroup_parent: /loadtest-app
+    # Replace the host port 3000 from docker-compose.yml with 3100, so this stack can run next to the development app.
+    # k6 does not use this port. It reaches the app inside the Docker network at http://app:3000.
+    ports: !override
+      # Open http://localhost:3100 to look at the load test app in a browser.
+      - "3100:3000"
     # Run on the same droplet cores as the db. Either one can use both cores when the other is idle.
     cpuset: ${SUT_CPUSET:-0-1}
     # Limit memory to the droplet size.

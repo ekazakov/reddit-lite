@@ -13,9 +13,14 @@ if [ -f loadtest/.env ]; then ENV_FILE="--env-file loadtest/.env"; fi
 
 # ShellCheck warns about the unquoted $ENV_FILE. We need word splitting here, so we turn the warning off.
 # shellcheck disable=SC2086
+# The Compose project name of the load test stack. A separate project gets its own containers and its own pgdata volume,
+# so seed.sh and restore.sh never touch the development database. Set LOADTEST_PROJECT to run a second, parallel stack.
+PROJECT="${LOADTEST_PROJECT:-reddit-lite-loadtest}"
+
 # Run docker compose with the base file and the load test overlay, and pass extra arguments through.
+# -p selects the load test project, so the default development project stays untouched.
 compose() {
-  docker compose $ENV_FILE -f docker-compose.yml -f docker-compose.loadtest.yml "$@"
+  docker compose -p "$PROJECT" $ENV_FILE -f docker-compose.yml -f docker-compose.loadtest.yml "$@"
 }
 
 # Run psql in the db container. -T turns off the TTY, so redirected input works.

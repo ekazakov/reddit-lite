@@ -2,6 +2,19 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 // Needs a Postgres reachable through DATABASE_URL. The tests reset the public schema.
+// `pnpm test` sets DATABASE_URL from TEST_DATABASE_URL, or to the local reddit_lite_test database.
+// Refuse to run on any database whose name does not end with _test, so a wrong URL cannot wipe real data.
+// This check runs before the import of src/db.ts, so no connection opens to the wrong database.
+const testDbName = process.env.DATABASE_URL
+  ? decodeURIComponent(new URL(process.env.DATABASE_URL).pathname.slice(1))
+  : '';
+if (!testDbName.endsWith('_test')) {
+  throw new Error(
+    `Refusing to run tests on database "${testDbName || '(DATABASE_URL is not set)'}". ` +
+      'The tests drop the public schema. Use a database whose name ends with _test (see pnpm db:test:setup).',
+  );
+}
+
 const { sql } = await import('../src/db.ts');
 const { migrate } = await import('../src/migrate.ts');
 const { app } = await import('../src/app.ts');
@@ -9,6 +22,19 @@ const { app } = await import('../src/app.ts');
 const ORIGIN = 'http://localhost';
 
 before(async () => {
+  try {
+    // The first query opens the connection, so a missing database fails here.
+    await sql`SELECT 1`;
+  } catch (err) {
+    // 3D000 is the Postgres code for "database does not exist". Tell the user the next step instead of a bare error.
+    if ((err as { code?: string }).code === '3D000') {
+      throw new Error(
+        `The test database "${testDbName}" does not exist. Run "pnpm db:test:setup" once to create it, then run the tests again.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
   await sql`DROP SCHEMA public CASCADE`;
   await sql`CREATE SCHEMA public`;
   await migrate();

@@ -21,7 +21,11 @@ Stack: Node.js 24 or newer, pnpm, Hono, TypeScript, Postgres, vanilla JavaScript
 - Audit runtime dependencies: `pnpm security:audit`
 - Scan images and files with Trivy: `pnpm security:scan`
 
-The tests in `test/app.test.ts` reset the `public` schema of the database in `DATABASE_URL`. Point `DATABASE_URL` at a throwaway database before you run them.
+The tests in `test/app.test.ts` drop the `public` schema of their database. `pnpm test` does not read `DATABASE_URL`. It uses `TEST_DATABASE_URL`, and the default is the local `reddit_lite_test` database. Create that database once with `pnpm db:test:setup`. The tests refuse to run on a database whose name does not end with `_test`. Do not remove this check.
+
+The load test stack (`pnpm loadtest:*`) runs in its own Compose project, `reddit-lite-loadtest`, with its own `pgdata` volume. Its host ports are 5433 for the db and 3100 for the app. `pnpm loadtest:seed` and `pnpm loadtest:restore` do not touch the development database.
+
+A Claude Code hook in `.claude/settings.json` runs `pnpm typecheck` and `pnpm test` before each `git commit`, and blocks the commit if they fail.
 
 ## Layout
 

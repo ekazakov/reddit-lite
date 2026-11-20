@@ -36,7 +36,7 @@ Run these commands from the repo root, in this order.
 
 2. Load the mock data. The tiers are `S`, `default`, and `L`.
 
-   Warning: this command deletes all rows in the local Docker database.
+   Warning: this command deletes all rows in the load test database. The development database is safe, because the load test stack uses its own Compose project (`reddit-lite-loadtest`) and its own volume.
 
    ```bash
    pnpm loadtest:seed default
@@ -207,4 +207,4 @@ sh scripts/loadtest/compose.sh logs db
 pnpm loadtest:down
 ```
 
-The data stays in the `pgdata` volume. The development stack (`docker compose up`) uses the same volume. If you want the small development data after a load test, run `pnpm seed` again.
+The data stays in the `reddit-lite-loadtest_pgdata` volume. The development stack (`docker compose up`) uses a different volume, so its data does not change. The load test stack publishes the db on host port 5433 and the app on host port 3100. Because of this, both stacks can run at the same time.
