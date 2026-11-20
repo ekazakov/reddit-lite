@@ -62,3 +62,17 @@ Keep the security settings in `pnpm-workspace.yaml` explicit, including the ones
 ## Known limits
 
 Users have no passwords. Anyone can act as any user. Do not treat this as a bug to fix unless the task asks for it.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `ekazakov/reddit-lite`, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

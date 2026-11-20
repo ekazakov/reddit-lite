@@ -4,7 +4,7 @@
 import { baseOptions, botIteration, thresholds } from './lib.js';
 
 // The rates to test. The defaults double each step, so the breaking point shows up fast.
-const steps = (__ENV.STEPS || '25,50,70,90,100,110,80,50').split(',').map(Number);
+const steps = (__ENV.STEPS || '100,200,400,500,600,80').split(',').map(Number);
 // The time to move from one rate to the next.
 const ramp = __ENV.RAMP || '15s';
 // The time to stay on each rate. A long hold lets the system settle, so the numbers are stable.
