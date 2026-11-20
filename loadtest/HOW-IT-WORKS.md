@@ -196,7 +196,7 @@ Run all commands from the repo root.
 
    | Service | Address |
    |---|---|
-   | App | http://localhost:3000 |
+   | App | http://localhost:3100 |
    | Grafana | http://localhost:3001 |
    | Prometheus | http://localhost:9090 |
 
@@ -261,7 +261,7 @@ A threshold failure does not stop the run, because the thresholds use `abortOnFa
 pnpm loadtest:down
 ```
 
-The data stays in the `pgdata` volume. If you want the small development data again, run `pnpm seed`.
+The data stays in the `reddit-lite-loadtest_pgdata` volume. The load test stack is a separate Compose project, so the development database keeps its own data.
 
 ## Monitor the metrics
 

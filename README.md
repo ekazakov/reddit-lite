@@ -18,7 +18,17 @@ To run everything in containers instead, run `docker compose up --build`.
 
 ## Test
 
-The tests in `test/app.test.ts` reset the `public` schema of the database in `DATABASE_URL`. Use a throwaway database.
+The tests in `test/app.test.ts` drop the `public` schema of their database. For this reason, they use a separate database, `reddit_lite_test`, and never `reddit_lite`. The tests refuse to run on a database whose name does not end with `_test`.
+
+`pnpm test` ignores `DATABASE_URL`. It reads `TEST_DATABASE_URL`, and the default is `postgres://postgres:postgres@localhost:5432/reddit_lite_test`.
+
+Before the first test run, start the database (`docker compose up -d db`) and create the test database:
+
+```
+pnpm db:test:setup
+```
+
+Then run the checks:
 
 ```
 pnpm typecheck

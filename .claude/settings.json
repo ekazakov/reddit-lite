@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.command' | grep -q 'git commit' && (pnpm check && pnpm test || { echo 'checks failed' >&2; exit 2; }) || true"
+            "command": "input=$(cat); printf '%s' \"$input\" | jq -r '.tool_input.command' | grep -q 'git commit' || exit 0; cd \"$(printf '%s' \"$input\" | jq -r '.cwd')\" || exit 2; { pnpm typecheck && pnpm test; } >&2 || { echo 'Commit blocked: pnpm typecheck or pnpm test failed.' >&2; exit 2; }"
           }
         ]
       }
