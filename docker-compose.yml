@@ -7,7 +7,8 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: reddit_lite
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Mount the parent folder, because Postgres 18+ images keep data in /var/lib/postgresql/<major>/docker and refuse to start with a mount on .../data.
+      - pgdata:/var/lib/postgresql
     ports:
       - "5432:5432"
     healthcheck:
