@@ -41,5 +41,5 @@
     "typescript": "7.0.2",
     "uplot": "1.6.32"
   },
-  "packageManager": "pnpm@12.21.0"
+  "packageManager": "pnpm@12.22.0"
 }
