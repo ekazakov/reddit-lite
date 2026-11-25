@@ -37,7 +37,7 @@
     "postgres": "4.1.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.6",
+    "@types/node": "26.6.10",
     "typescript": "7.0.2",
     "uplot": "1.6.32"
   },
