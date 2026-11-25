@@ -93,7 +93,7 @@ services:
   grafana:
     # Pin the version, so the dashboard JSON keeps working.
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
-    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+    image: grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101
     # Keep off the app and db cores, so dashboard queries take no CPU from the system under test.
     cpuset: ${TOOLS_CPUSET:-2-5}
     environment:
