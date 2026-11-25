@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.9",
-    "hono": "4.13.19",
+    "hono": "4.13.22",
     "postgres": "4.1.1"
   },
   "devDependencies": {
