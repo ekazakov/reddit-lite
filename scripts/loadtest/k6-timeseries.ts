@@ -1,5 +1,6 @@
 // Turns the raw k6 CSV of a run (loadtest/results/<testid>/k6.csv.gz) into 1 s and 10 s buckets in timeseries.json.
-// Prometheus only has percentiles per 5 s push window. The CSV has every request, so the buckets here
+// Prometheus only has cumulative percentiles: k6 computes each pushed p95 over all requests since the run started.
+// The CSV has every request, so the buckets here
 // have exact per-second rates and exact p50/p95/p99, also per action.
 // Usage: node scripts/loadtest/k6-timeseries.ts <testid> [--force]
 // The result is cached. It is built again only when the CSV is newer than timeseries.json, or with --force.

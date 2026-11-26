@@ -2,7 +2,7 @@
 // Plain JavaScript with no bundler, like the rest of the browser code in this repository.
 // Data sources per run, in order of preference:
 //   ts          per-second and 10 s buckets from k6.csv.gz (exact percentiles)
-//   promSeries  raw 5 s Prometheus points (k6 per push window, CPU, memory, Postgres)
+//   promSeries  raw 5 s Prometheus points (k6 percentiles cumulative since the run start, CPU, memory, Postgres)
 //   prom        prom.json: totals, knee, whole-run stats, top queries
 //   summary     k6 --summary-export: whole-run k6 numbers and checks
 //   meta        what was run, and the app and db configuration
@@ -138,7 +138,8 @@
           from,
           offered: promAvg('k6_offered_rps', 'all', from, from + 10),
           http: promAvg('k6_http_rps', 'all', from, from + 10),
-          // The worst 5 s window is the closest to a 10 s p95 that the push data can give.
+          // The push data has no p95 per window: k6 sends the p95 of all requests since the run started.
+          // This value lags a rise in latency and stays high after a peak, so it is only a rough fallback.
           p95: promAvg('k6_p95_ms_worst', 'all', from, from + 10, 'max'),
           dropped: promAvg('k6_dropped_rps', 'all', from, from + 10),
           failedShare: promAvg('k6_failed_rate', 'all', from, from + 10) ?? 0,
