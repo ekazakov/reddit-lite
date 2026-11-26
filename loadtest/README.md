@@ -17,7 +17,7 @@ The plan and the task list are in these documents:
 | Variable | Default | Meaning |
 |---|---|---|
 | `SUT_CPUSET` | `0-1` | Docker VM CPUs that the app and db share, like the 2 vCPUs of the droplet |
-| `TOOLS_CPUSET` | `2-5` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
+| `TOOLS_CPUSET` | `4-13` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
 | `APP_MEM` | `512m` | Memory limit for the app container |
 | `APP_HEAP_MB` | `384` | Node heap limit, about 75% of `APP_MEM` |
 | `DB_MEM` | `1g` | Memory limit for the db container |
@@ -174,7 +174,7 @@ For each variant, the script recreates the app and db containers with the varian
 | `COOLDOWN` | `30` | Seconds between runs |
 | `DRY_RUN` | empty | Set to 1 to check the matrix only |
 
-`SUT_CPUSET` must not overlap `TOOLS_CPUSET`. To test more cores for app and db, first make `TOOLS_CPUSET` smaller in `loadtest/.env`, and run `scripts/loadtest/compose.sh up -d` so that the tools move.
+`SUT_CPUSET` must not overlap `TOOLS_CPUSET`. The default `TOOLS_CPUSET` is `4-13`, so app and db can use up to 4 cores (`0-3`). The default needs a Docker VM with 14 CPUs. To give app and db more cores, first make `TOOLS_CPUSET` smaller in `loadtest/.env`, and run `scripts/loadtest/compose.sh up -d` so that the tools move.
 
 ## Find the slow queries
 

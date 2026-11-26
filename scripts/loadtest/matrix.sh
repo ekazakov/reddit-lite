@@ -81,8 +81,8 @@ expand_cpus() {
 
 # Checks one variant. Prints the problem and returns 1 when the settings are not valid.
 check_variant() {
-  # The CPUs that the tools (Prometheus, k6, exporters) use. app and db must not share them.
-  tools=$(expand_cpus "$(env_value TOOLS_CPUSET 2-5)")
+  # The CPUs that the tools (Prometheus, k6, exporters) use. app and db must not share them. 4-13 matches the compose default.
+  tools=$(expand_cpus "$(env_value TOOLS_CPUSET 4-13)")
   # The CPUs of the variant.
   sut=$(expand_cpus "$SUT_CPUSET")
   # The number of CPUs in the Docker VM. A cpuset past it makes "compose up" fail.

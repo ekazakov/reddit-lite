@@ -16,7 +16,7 @@ flowchart LR
         app -- "SQL, pool of 10" --> db
     end
 
-    subgraph measure["Measurement (CPUs 2-5)"]
+    subgraph measure["Measurement (CPUs 4-13)"]
         k6["k6<br/>load generator"]
         pgexp["postgres-exporter<br/>:9187"]
         cadv["cAdvisor<br/>:8080"]
@@ -62,7 +62,7 @@ The overlay sets the limits from these variables. You can change them in `loadte
 | Variable | Default | Meaning |
 |---|---|---|
 | `SUT_CPUSET` | `0-1` | Docker VM CPUs that the app and db share, like the 2 vCPUs of the droplet |
-| `TOOLS_CPUSET` | `2-5` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
+| `TOOLS_CPUSET` | `4-13` | Docker VM CPUs for Prometheus, Grafana, the exporters, and k6. Must not overlap `SUT_CPUSET` |
 | `APP_MEM` | `512m` | Memory limit for the app container |
 | `APP_HEAP_MB` | `384` | Node heap limit, about 75% of `APP_MEM` |
 | `DB_MEM` | `1g` | Memory limit for the db container |

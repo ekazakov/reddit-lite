@@ -6,6 +6,7 @@
 # CPU split: app and db share the cores in SUT_CPUSET, as they share the vCPUs of the one
 # production droplet. All other services run on TOOLS_CPUSET, so they take no CPU from app and db.
 # Both lists use CPU numbers of the Docker VM. A number that the VM does not have stops the container from starting.
+# The default TOOLS_CPUSET 4-13 needs a VM with 14 CPUs. It leaves CPUs 0-3 free, so SUT_CPUSET can grow to 4 cores.
 services:
   # Extend the db service from docker-compose.yml with limits and tuning.
   db:
@@ -72,7 +73,7 @@ services:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
     image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     # Keep off the app and db cores, so metric storage takes no CPU from the system under test.
-    cpuset: ${TOOLS_CPUSET:-2-5}
+    cpuset: ${TOOLS_CPUSET:-4-13}
     command:
       # Read the scrape settings from the mounted file.
       - --config.file=/etc/prometheus/prometheus.yml
@@ -95,7 +96,7 @@ services:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
     image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     # Keep off the app and db cores, so dashboard queries take no CPU from the system under test.
-    cpuset: ${TOOLS_CPUSET:-2-5}
+    cpuset: ${TOOLS_CPUSET:-4-13}
     environment:
       # Let visitors in with no login. This stack is local only.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -120,7 +121,7 @@ services:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
     image: prometheuscommunity/postgres-exporter:v0.21.1@sha256:3b8e05a84282cd1199ad2fb6c66f362738bf4c68c1547d8f4226a34a7dd6d8d7
     # Keep the exporter process off the db cores. Its SQL queries still run inside the db container.
-    cpuset: ${TOOLS_CPUSET:-2-5}
+    cpuset: ${TOOLS_CPUSET:-4-13}
     environment:
       # The connection string. The names "db" and "reddit_lite" come from the db service.
       DATA_SOURCE_NAME: postgresql://postgres:postgres@db:5432/reddit_lite?sslmode=disable
@@ -137,7 +138,7 @@ services:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
     image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     # Keep off the app and db cores, so reading statistics takes no CPU from the system under test.
-    cpuset: ${TOOLS_CPUSET:-2-5}
+    cpuset: ${TOOLS_CPUSET:-4-13}
     # cAdvisor needs wide access to the host to read container statistics.
     privileged: true
     # With cgroup v2, a container gets a private cgroup namespace and sees only itself.
@@ -172,7 +173,7 @@ services:
     # Pin the tag and the digest, so every pull gets the same bytes. Renovate opens a PR when either changes.
     image: grafana/k6:2.4.0@sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276
     # Keep the load generator off the app and db cores. Thousands of VUs need a lot of CPU.
-    cpuset: ${TOOLS_CPUSET:-2-5}
+    cpuset: ${TOOLS_CPUSET:-4-13}
     # Do not start k6 with "up". scripts/loadtest/k6.sh starts it with "run".
     profiles: ["k6"]
     # Run from the mounted folder, so scripts find their data files with relative paths.
