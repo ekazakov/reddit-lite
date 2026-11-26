@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 3. Как из counter получается rate</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<nav class="course">
+  <a href="0002-how-metrics-are-collected.html">2. Сбор</a>
+  <a href="0003-counter-to-rate.html"><b>3. Rate</b></a>
+  <a href="0004-percentile.html">4. Перцентиль</a>
+  <a href="0005-histogram-and-summary.html">5. Histogram и summary</a>
+  <a href="0001-prometheus-metrics-from-first-principles.html">1. Обзор стека</a>
+  <a href="../reference/prometheus-metrics-catalog.html">Справочник</a>
+</nav>
+
+<h1>Как из counter получается rate</h1>
+<p class="lede">Counter отвечает на вопрос «сколько всего». Почти всегда нужен другой вопрос: «как быстро сейчас». Функция <code>rate()</code> переводит первый ответ во второй.</p>
+<p class="meta">Урок 3 · ~15 минут · нужна только арифметика: вычитание и деление</p>
+
+<div class="callout">
+<strong>Цель урока.</strong> Вы считаете <code>rate()</code> руками по нескольким точкам, включая случай, когда сервис перезапустился и счётчик упал в ноль.
+</div>
+
+<h2>Идея: скорость это изменение, делённое на время</h2>
+
+<p>Представьте одометр в машине. Он показывает, сколько километров машина проехала за всю жизнь. Это counter. Если в 12:00 было 50 000 км, а в 13:00 стало 50 080 км, средняя скорость за час 80 км/ч. Это rate.</p>
+
+<p>Возьмём настоящие точки из вашего Prometheus: ряд <code>k6_http_reqs_total{action="feed"}</code> из smoke-теста. k6 отправлял их каждые 5 секунд.</p>
+
+<table>
+<tr><th>Время, с</th><td>5</td><td>10</td><td>15</td><td>20</td><td>25</td><td>30</td><td>35</td><td>40</td><td>45</td><td>50</td></tr>
+<tr><th>Значение</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td><td>8</td><td>9</td><td>10</td></tr>
+</table>
+
+<p>Запрос <code>rate(k6_http_reqs_total[30s])</code> в момент 40 с делает вот что:</p>
+
+<ol class="steps">
+<li>Берёт точки за последние 30 секунд: от 15 с до 40 с. Это значения 3, 4, 5, 6, 7, 8.</li>
+<li>Вычитает первое из последнего: 8 − 3 = 5 запросов.</li>
+<li>Делит на время между этими точками: 40 − 15 = 25 секунд.</li>
+<li>Результат: 5 / 25 = <b>0,2 запроса в секунду</b>. Один запрос каждые 5 секунд, как и было в тесте.</li>
+</ol>
+
+<p>Окно в квадратных скобках <code>[30s]</code> выбираете вы. Дашборды в репозитории используют 30 секунд, это 6 точек при опросе раз в 5 секунд.</p>
+
+<h2>Перезапуск: counter падает в ноль</h2>
+
+<p>Counter хранится в памяти программы. Если программа перезапустилась, счёт начинается заново с нуля <a class="cite" href="https://prometheus.io/docs/concepts/metric_types/">[1]</a>. Простое «последнее минус первое» тогда даёт ерунду.</p>
+
+<table>
+<tr><th>Время, с</th><td>0</td><td>5</td><td>10</td><td>15</td><td>20</td></tr>
+<tr><th>Значение</th><td>100</td><td>120</td><td>140</td><td style="color:#b3261e"><b>5</b></td><td>25</td></tr>
+<tr><th>Что было на самом деле</th><td></td><td>+20</td><td>+20</td><td>+5 после рестарта</td><td>+20</td></tr>
+</table>
+
+<p>Наивно: 25 − 100 = −75. Отрицательное число запросов невозможно. Prometheus поступает так <a class="cite" href="https://github.com/prometheus/prometheus/blob/main/promql/functions.go">[2]</a>: каждый раз, когда значение меньше предыдущего, он считает, что был рестарт, и прибавляет предыдущее значение. Здесь значение упало после 140, поэтому: −75 + 140 = <b>65</b>. Проверка: 20 + 20 + 5 + 20 = 65. Сходится.</p>
+
+<p class="sidenote">Поэтому <code>scripts/loadtest/prom-summary.ts</code> считает итоги прогона через <code>increase()</code>, а не через «значение в конце минус значение в начале». Комментарий в коде: «increase() handles counter resets, unlike end minus start».</p>
+
+<h2>Попробуйте сами</h2>
+
+<div class="widget" id="w-rate">
+<p class="hint">Верхний график: counter, точки раз в 5 секунд. Двигайте окно и меняйте его длину. Нижний график: rate в каждый момент.</p>
+<svg id="rate-svg"></svg>
+<div class="controls">
+  <label>конец окна <input type="range" id="r-end" min="10" max="120" step="5" value="60"> <b id="r-end-v"></b> с</label>
+  <label>длина окна
+    <select id="r-len"><option value="5">5s</option><option value="15">15s</option><option value="30" selected>30s</option><option value="60">60s</option></select>
+  </label>
+  <label><input type="checkbox" id="r-reset"> перезапуск на 75 с</label>
+</div>
+<div class="readout" id="rate-out"></div>
+</div>
+
+<p>Попробуйте окно 5s. Внутри часто оказывается одна точка, и rate посчитать нельзя: нужно минимум две. Поэтому окно должно быть в несколько раз длиннее интервала опроса.</p>
+
+<h2>Тонкость: досчёт до краёв окна</h2>
+
+<p>В примере выше точки покрывают 25 секунд, а окно 30. Prometheus мысленно продлевает линию до краёв окна: «The increase is extrapolated to cover the full time range» <a class="cite" href="https://prometheus.io/docs/prometheus/latest/querying/functions/#increase">[3]</a>. Тогда <code>increase</code> = 5 × 30/25 = 6, а <code>rate</code> = 6 / 30 = 0,2. Ответ тот же. Продлевать он будет только на небольшое расстояние: если до края окна больше 1,1 среднего интервала между точками, он продлевает лишь на половину интервала <a class="cite" href="https://github.com/prometheus/prometheus/blob/main/promql/functions.go">[2]</a>. Из-за этого <code>increase()</code> иногда даёт дробное число для целого счётчика. Это нормально.</p>
+
+<h2>Три родственные функции</h2>
+
+<table>
+<tr><th>Функция</th><th>Что даёт</th><th>Пример из стека</th></tr>
+<tr><td><code>rate(x[30s])</code></td><td>Среднюю скорость в секунду за окно</td><td><code>sum(rate(k6_http_reqs_total[30s]))</code>: запросов в секунду</td></tr>
+<tr><td><code>increase(x[R])</code></td><td>Прирост за окно. Это rate × длина окна</td><td><code>sum(increase(pg_stat_database_xact_commit[R]))</code>: коммитов за весь прогон</td></tr>
+<tr><td><code>irate(x[30s])</code></td><td>Скорость только по двум последним точкам. Более резкая и шумная</td><td>в стеке не используется</td></tr>
+</table>
+
+<p>Все три работают только с counter. Для gauge они не имеют смысла: gauge может уменьшаться без перезапуска, и падение будет ошибочно принято за рестарт.</p>
+
+<h2>Проверьте себя</h2>
+<p class="score"></p>
+
+<div class="quiz" data-answer="2">
+<div class="q">1. Точки counter: 40 с → 200, 45 с → 230, 50 с → 260, 55 с → 300, 60 с → 320. Чему примерно равен <code>rate(x[20s])</code> в момент 60 с?</div>
+<button class="opt">320 запросов в секунду</button>
+<button class="opt">16 запросов в секунду</button>
+<button class="opt">6 запросов в секунду</button>
+<button class="opt">90 запросов в секунду</button>
+<div class="fb">В окне точки от 45 до 60 с: (320 − 230) / (60 − 45) = 90 / 15 = 6 в секунду. 90 это increase, а не rate.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">2. Точки: 500, 520, 10, 30. Какой прирост посчитает Prometheus?</div>
+<button class="opt">50: падение после 520 считается рестартом</button>
+<button class="opt">−470: последнее значение минус первое</button>
+<button class="opt">30: Prometheus берёт только последнее значение</button>
+<button class="opt">0: при рестарте ряд целиком отбрасывается</button>
+<div class="fb">Наивно 30 − 500 = −470. Значение упало после 520, прибавляем 520: −470 + 520 = 50. Проверка: 20 + 10 + 20 = 50.</div>
+</div>
+
+<div class="quiz" data-answer="3">
+<div class="q">3. Prometheus опрашивает цель раз в 15 секунд. Почему <code>rate(x[15s])</code> часто пустой?</div>
+<button class="opt">rate не работает с окном меньше минуты</button>
+<button class="opt">rate требует, чтобы ряд был типа gauge</button>
+<button class="opt">rate ждёт следующего опроса для расчёта</button>
+<button class="opt">в окно часто попадает лишь одна точка</button>
+<div class="fb">Для скорости нужны две точки. Обычное правило: окно хотя бы в 4 раза длиннее интервала опроса.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+<div class="q">4. Почему нельзя писать <code>rate(container_memory_working_set_bytes[30s])</code>?</div>
+<button class="opt">Память измеряется в байтах, а не в штуках</button>
+<button class="opt">Это gauge: спад памяти примут за рестарт</button>
+<button class="opt">cAdvisor отдаёт память слишком редко</button>
+<button class="opt">rate нельзя применять к метрикам cAdvisor</button>
+<div class="fb">Память может уменьшаться без перезапуска. rate увидит каждое уменьшение как сброс счётчика и прибавит лишнее.</div>
+</div>
+
+<div class="callout ask">
+<strong>Вопрос на понимание. Ответьте своими словами в чате.</strong>
+<p><code>rate(container_cpu_usage_seconds_total[30s])</code> равен 1,5. Единица метрики: секунды процессорного времени. Что значит 1,5 «секунды в секунду»? Почему дашборд подписывает это как «ядра»?</p>
+</div>
+
+<h2>Что читать</h2>
+<p>Главный источник: раздел <a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#rate">rate()</a> в документации Prometheus и соседние <code>increase()</code>, <code>irate()</code>. Если интересен точный алгоритм, функция <code>extrapolatedRate</code> в <a href="https://github.com/prometheus/prometheus/blob/main/promql/functions.go">promql/functions.go</a> читается за 10 минут.</p>
+
+<h3>Источники</h3>
+<ol class="meta">
+<li><a href="https://prometheus.io/docs/concepts/metric_types/">prometheus.io: Metric types</a></li>
+<li><a href="https://github.com/prometheus/prometheus/blob/main/promql/functions.go">Prometheus source: extrapolatedRate in promql/functions.go</a></li>
+<li><a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#increase">prometheus.io: increase()</a></li>
+</ol>
+
+<p class="sidenote">Что-то непонятно? Спросите меня в чате. Я ваш преподаватель.</p>
+
+<div class="lessons-nav"><a href="0002-how-metrics-are-collected.html">← Урок 2: сбор</a><a href="0004-percentile.html">Урок 4: перцентиль →</a></div>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/viz.js"></script>
+<script>
+(function () {
+  // Requests per second over time: calm, ramp, peak, calm.
+  const load = (t) => t < 30 ? 4 : t < 60 ? 4 + (t - 30) * 0.4 : t < 90 ? 16 : 6;
+  function series(reset) {
+    const pts = []; let total = 0;
+    for (let t = 0; t <= 120; t += 5) {
+      if (t > 0) total += load(t - 2.5) * 5;
+      if (reset && t === 80) total = load(77.5) * 5 * 0.4; // restart happened at 75 s
+      pts.push([t, Math.round(total)]);
+    }
+    return pts;
+  }
+  // Rate as Prometheus does it for aligned samples: corrected delta / time between first and last sample.
+  function rateAt(pts, end, len) {
+    const w = pts.filter(([t]) => t > end - len && t <= end);
+    if (w.length < 2) return { w, rate: null };
+    let delta = w.at(-1)[1] - w[0][1]; const fixes = [];
+    for (let i = 1; i < w.length; i++) if (w[i][1] < w[i - 1][1]) { delta += w[i - 1][1]; fixes.push(w[i - 1][1]); }
+    return { w, delta, fixes, rate: delta / (w.at(-1)[0] - w[0][0]) };
+  }
+  function draw() {
+    const end = +document.getElementById('r-end').value;
+    const len = +document.getElementById('r-len').value;
+    const reset = document.getElementById('r-reset').checked;
+    document.getElementById('r-end-v').textContent = end;
+    const pts = series(reset);
+    const s = Viz.svg('#rate-svg', 720, 360);
+    const X = Viz.scale(0, 120, 50, 700);
+    const maxC = Math.max(...pts.map((p) => p[1]));
+    const Y = Viz.scale(0, maxC * 1.05, 190, 20);
+    // Window band.
+    Viz.rect(s, X(Math.max(0, end - len)), 20, X(end) - X(Math.max(0, end - len)), 170, { color: '#f6e7d6' });
+    Viz.text(s, 50, 14, 'counter k6_http_reqs_total', { color: '#2f6db3', weight: 600 });
+    Viz.hline(s, 190, 50, 700);
+    Viz.text(s, 46, Y(maxC), String(maxC), { anchor: 'end' });
+    Viz.line(s, pts.map(([t, v]) => [X(t), Y(v)]), { color: '#2f6db3' });
+    const r = rateAt(pts, end, len);
+    pts.forEach(([t, v]) => Viz.dot(s, X(t), Y(v), { color: r.w.some((p) => p[0] === t) ? '#a4442a' : '#2f6db3', r: 3.5 }));
+    // Rate panel.
+    const rates = []; for (let t = 10; t <= 120; t += 5) { const x = rateAt(pts, t, len); if (x.rate !== null) rates.push([t, x.rate]); }
+    const maxR = Math.max(20, ...rates.map((p) => p[1]));
+    const R = Viz.scale(0, maxR, 340, 230);
+    Viz.text(s, 50, 222, `rate(...[${len}s]) — запросов в секунду`, { color: '#a4442a', weight: 600 });
+    Viz.hline(s, 340, 50, 700);
+    for (let t = 0; t <= 120; t += 20) Viz.text(s, X(t), 355, t + ' с', { anchor: 'middle' });
+    Viz.text(s, 46, R(maxR) + 4, String(Math.round(maxR)), { anchor: 'end' });
+    Viz.text(s, 46, 344, '0', { anchor: 'end' });
+    Viz.line(s, rates.map(([t, v]) => [X(t), R(v)]), { color: '#a4442a' });
+    Viz.vline(s, X(end), 20, 340, { color: '#a4442a', dash: '3 3' });
+    if (r.rate !== null) Viz.dot(s, X(end), R(r.rate), { color: '#a4442a' });
+
+    const out = document.getElementById('rate-out');
+    if (r.rate === null) {
+      out.textContent = `В окне (${end - len} с; ${end} с] точек: ${r.w.length}. Нужно минимум две. rate пустой.`;
+    } else {
+      const f = r.w[0], l = r.w.at(-1);
+      let txt = `Точки в окне: ${r.w.map((p) => p[1]).join(', ')}\n`;
+      txt += `последнее − первое = ${l[1]} − ${f[1]} = ${l[1] - f[1]}\n`;
+      if (r.fixes.length) txt += `падение значения → рестарт → прибавляем ${r.fixes.join(' + ')} → прирост ${r.delta}\n`;
+      txt += `время между точками = ${l[0]} − ${f[0]} = ${l[0] - f[0]} с\n`;
+      txt += `rate = ${r.delta} / ${l[0] - f[0]} = ${Viz.fmt(r.rate, 2)} запроса в секунду`;
+      out.textContent = txt;
+    }
+  }
+  ['r-end', 'r-len', 'r-reset'].forEach((id) => document.getElementById(id).addEventListener('input', draw));
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 1. Метрики Prometheus в load test стеке: пять вопросов к любой метрике</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<nav class="course">
+  <a href="0002-how-metrics-are-collected.html">2. Сбор</a>
+  <a href="0003-counter-to-rate.html">3. Rate</a>
+  <a href="0004-percentile.html">4. Перцентиль</a>
+  <a href="0005-histogram-and-summary.html">5. Histogram и summary</a>
+  <a href="0001-prometheus-metrics-from-first-principles.html"><b>1. Обзор стека</b></a>
+  <a href="../reference/prometheus-metrics-catalog.html">Справочник</a>
+</nav>
+
+<div class="callout ask">
+<strong>Если вы раньше не работали с метриками,</strong> начните с уроков 2–5: <a href="0002-how-metrics-are-collected.html">сбор метрик</a>, <a href="0003-counter-to-rate.html">rate</a>, <a href="0004-percentile.html">перцентиль</a>, <a href="0005-histogram-and-summary.html">histogram и summary</a>. Этот урок опирается на них и связывает всё в карту стека.
+</div>
+
+<h1>Метрики Prometheus: пять вопросов к любой метрике</h1>
+<p class="lede">Prometheus в reddit-lite хранит 511 имён метрик. Дашборды используют около сорока. Урок даёт способ разобрать любую из них за минуту.</p>
+<p class="meta">Урок 1 · ~20 минут · основа: <code>loadtest/prometheus.yml</code>, <code>docker-compose.loadtest.yml</code>, <code>loadtest/grafana/dashboards/*.json</code>, <code>scripts/loadtest/prom-summary.ts</code></p>
+
+<div class="callout">
+<strong>Цель урока.</strong> После урока вы смотрите на имя метрики, например <code>pg_stat_database_blks_hit</code>, и сразу говорите: кто её отдаёт, растёт ли она только вверх, в чём она измеряется, на какие части её можно разрезать и какой из четырёх сигналов она показывает. Из этого следует правильный PromQL.
+</div>
+
+<h2>Откуда берутся метрики</h2>
+
+<p>В стеке пять источников. Четыре из них Prometheus опрашивает сам (pull, «скрейп») каждые 5 секунд. Один источник, k6, сам отправляет данные (push, remote write). Это первое фундаментальное различие: кто инициирует передачу.</p>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="Схема источников метрик">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#6b6b70"/></marker>
+  </defs>
+  <style>
+    .box{fill:#fff;stroke:#1d1d1f;stroke-width:1.2}
+    .t{font:14px -apple-system,system-ui,sans-serif;fill:#1d1d1f}
+    .s{font:11.5px -apple-system,system-ui,sans-serif;fill:#6b6b70}
+    .n{font:600 13px -apple-system,system-ui,sans-serif}
+    .l{stroke:#6b6b70;stroke-width:1.4;fill:none;marker-end:url(#a)}
+    .push{stroke:#a4442a;stroke-dasharray:5 4}
+  </style>
+  <!-- prometheus -->
+  <rect class="box" x="290" y="110" width="140" height="80" rx="8" style="stroke-width:2"/>
+  <text class="t" x="360" y="145" text-anchor="middle" font-weight="600">Prometheus</text>
+  <text class="s" x="360" y="165" text-anchor="middle">хранит ряды 7 дней</text>
+  <!-- k6 -->
+  <rect class="box" x="20" y="20" width="170" height="64" rx="8"/>
+  <text class="t" x="105" y="46" text-anchor="middle">k6</text>
+  <text class="s" x="105" y="66" text-anchor="middle">40 метрик · k6_*</text>
+  <path class="l push" d="M190,60 C250,60 270,110 300,125"/>
+  <text class="s" x="200" y="100" fill="#a4442a">push каждые 5 с</text>
+  <!-- pg exporter -->
+  <rect class="box" x="20" y="200" width="170" height="64" rx="8"/>
+  <text class="t" x="105" y="226" text-anchor="middle">postgres-exporter</text>
+  <text class="s" x="105" y="246" text-anchor="middle">373 метрики · pg_*</text>
+  <path class="l" d="M295,175 C250,200 230,230 192,232"/>
+  <!-- cadvisor -->
+  <rect class="box" x="530" y="20" width="170" height="64" rx="8"/>
+  <text class="t" x="615" y="46" text-anchor="middle">cAdvisor</text>
+  <text class="s" x="615" y="66" text-anchor="middle">53 метрики · container_*</text>
+  <path class="l" d="M425,125 C460,100 490,70 528,60"/>
+  <!-- self -->
+  <rect class="box" x="530" y="200" width="170" height="64" rx="8"/>
+  <text class="t" x="615" y="226" text-anchor="middle">служебные</text>
+  <text class="s" x="615" y="246" text-anchor="middle">up, scrape_*, go_*, process_*</text>
+  <path class="l" d="M425,175 C470,205 495,232 528,232"/>
+  <text class="s" x="440" y="290" text-anchor="middle">сплошная линия: Prometheus сам приходит и забирает (pull, scrape)</text>
+</svg>
+<figcaption>Реальные числа из <code>/api/v1/label/__name__/values</code> вашего локального Prometheus. Из 373 метрик <code>pg_*</code> 288 штук это <code>pg_settings_*</code>, то есть настройки Postgres, а не нагрузка.</figcaption>
+</figure>
+
+<p class="sidenote">Почему k6 отправляет сам? k6 живёт только во время теста и может закончиться между двумя скрейпами. Комментарий в <code>docker-compose.loadtest.yml</code>: «k6 does not wait to be scraped». Поэтому у Prometheus включён флаг <code>--web.enable-remote-write-receiver</code>.</p>
+
+<h2>Пять вопросов к любой метрике</h2>
+
+<table>
+<tr><th>#</th><th>Вопрос</th><th>Где ответ</th><th>Пример: <code>container_cpu_usage_seconds_total</code></th></tr>
+<tr><td>1</td><td>Кто её отдаёт?</td><td>Префикс имени</td><td><code>container_</code> → cAdvisor</td></tr>
+<tr><td>2</td><td>Какой тип?</td><td>Суффикс <code>_total</code>, метаданные <code># TYPE</code></td><td>counter: только растёт</td></tr>
+<tr><td>3</td><td>Какая единица?</td><td>Суффикс <code>_seconds</code>, <code>_bytes</code>, <code>_rate</code></td><td>секунды процессорного времени</td></tr>
+<tr><td>4</td><td>Какие метки?</td><td>Запрос <code>/api/v1/series</code></td><td><code>id="/loadtest-app"</code>, <code>id="/loadtest-db"</code></td></tr>
+<tr><td>5</td><td>Какой сигнал?</td><td>Смысл метрики</td><td>использование ресурса (насыщение)</td></tr>
+</table>
+
+<p>Из ответов 2 и 3 следует запрос: <code>rate(container_cpu_usage_seconds_total[30s])</code> даёт «секунды CPU в секунду», то есть число занятых ядер. Значение 1.0 означает одно полное ядро.</p>
+
+<h2>Вопрос 2: тип. Главное различие</h2>
+
+<p>У Prometheus четыре типа: counter, gauge, histogram, summary <a class="cite" href="https://prometheus.io/docs/concepts/metric_types/">[1]</a>. В вашем стеке реально встречаются три формы:</p>
+
+<ul>
+<li><span class="tag counter">counter</span> Счётчик. Он «can only increase or be reset to zero on restart» <a class="cite" href="https://prometheus.io/docs/concepts/metric_types/">[1]</a>. Сырое значение почти бесполезно: «с момента старта Postgres было 4 812 033 коммита». Смысл даёт скорость роста.</li>
+<li><span class="tag gauge">gauge</span> Показание прибора. Значение может идти вверх и вниз: сколько сейчас соединений, сколько памяти. Его читают как есть.</li>
+<li><span class="tag pre">готовая статистика</span> k6 сам считает p50, p95, p99 и max и каждые 5 секунд отправляет их как отдельные gauge: <code>k6_http_req_duration_p95</code> <a class="cite" href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">[3]</a>. Набор задаёт <code>K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max</code>. Важно: статистика считается по всем запросам с начала теста, а не за последние 5 секунд. Подробно в <a href="0005-histogram-and-summary.html">уроке 5</a>.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 720 330" role="img" aria-label="Counter и его rate">
+  <style>
+    .ax{stroke:#bbb;stroke-width:1}
+    .c{stroke:#2f6db3;stroke-width:2.2;fill:none}
+    .r{stroke:#a4442a;stroke-width:2.2;fill:none}
+    .lab{font:12px -apple-system,system-ui,sans-serif;fill:#6b6b70}
+    .h{font:600 13px -apple-system,system-ui,sans-serif}
+  </style>
+  <text class="h" x="40" y="20" fill="#2f6db3">pg_stat_database_xact_commit (сырое значение counter)</text>
+  <line class="ax" x1="40" y1="150" x2="700" y2="150"/>
+  <line class="ax" x1="40" y1="30" x2="40" y2="150"/>
+  <!-- counter: slow, fast, reset, slow -->
+  <polyline class="c" points="40,140 160,130 200,110 240,80 280,50 320,40 330,148 420,140 520,132 620,124 700,118"/>
+  <text class="lab" x="335" y="140">рестарт → сброс в 0</text>
+  <text class="lab" x="200" y="45">растёт быстро: нагрузка</text>
+
+  <text class="h" x="40" y="195" fill="#a4442a">rate(...[30s]) — коммитов в секунду</text>
+  <line class="ax" x1="40" y1="310" x2="700" y2="310"/>
+  <line class="ax" x1="40" y1="205" x2="40" y2="310"/>
+  <polyline class="r" points="40,296 160,296 180,280 200,250 240,232 280,232 310,265 330,296 420,296 520,296 620,296 700,296"/>
+  <text class="lab" x="335" y="285">rate не видит провала: сброс учтён</text>
+  <text class="lab" x="200" y="226">пик нагрузки</text>
+</svg>
+<figcaption>Сверху лестница счётчика, снизу его наклон. <code>rate()</code> понимает сбросы счётчика при рестарте <a class="cite" href="https://prometheus.io/docs/prometheus/latest/querying/functions/#rate">[2]</a>. Поэтому <code>prom-summary.ts</code> считает итоги через <code>increase()</code>, а не «конец минус начало».</figcaption>
+</figure>
+
+<div class="callout">
+<strong>Правило.</strong> Counter → оберните в <code>rate()</code> или <code>increase()</code>. Gauge → читайте как есть, <code>rate()</code> к нему не применяйте. Готовый перцентиль → только <code>max</code> по рядам, никогда <code>avg</code> или <code>sum</code>.
+</div>
+
+<h3>Почему перцентили нельзя усреднять</h3>
+
+<p>Дашборд k6 строит <code>max by (action) (k6_http_req_duration_p95)</code>, а не <code>avg</code>. Причина в том, что p95 одного ряда ничего не знает о распределении другого ряда: сколько в нём запросов и как они разбросаны. Документация Prometheus: «aggregating the precomputed quantiles from a summary rarely makes sense» <a class="cite" href="https://prometheus.io/docs/practices/histograms/">[4]</a>.</p>
+
+<figure>
+<svg viewBox="0 0 720 200" role="img" aria-label="Среднее двух p95">
+  <style>
+    .b{font:12.5px -apple-system,system-ui,sans-serif;fill:#1d1d1f}
+    .g{font:12px -apple-system,system-ui,sans-serif;fill:#6b6b70}
+  </style>
+  <text class="b" x="20" y="30">Ряд A: 950 быстрых запросов по 20 мс, 50 медленных по 2000 мс → p95 = 20 мс</text>
+  <rect x="20" y="40" width="10" height="20" fill="#7b4fa8"/>
+  <text class="b" x="20" y="90">Ряд B: 10 запросов, p95 = 900 мс</text>
+  <rect x="20" y="100" width="450" height="20" fill="#7b4fa8"/>
+  <text class="g" x="20" y="150">avg(p95) = 460 мс — такой задержки не было ни у одного пользователя.</text>
+  <text class="g" x="20" y="172">max(p95) = 900 мс — честная верхняя оценка: «хуже этого p95 не было».</text>
+</svg>
+<figcaption>Avg не взвешивает ряды по числу запросов. Max даёт консервативную оценку: худший ряд прямо сейчас. Его значение при этом покрывает весь прогон с начала теста. Поэтому <code>prom-summary.ts</code> называет ряд <code>k6_p95_ms_worst</code>.</figcaption>
+</figure>
+
+<p class="sidenote">У метрик k6 в <code>/api/v1/metadata</code> тип «?». Remote write не передал метаданные, и Prometheus тип не знает. Тип вы определяете по суффиксу: <code>_total</code> это counter, <code>_rate</code>, <code>_p95</code>, <code>_max</code>, <code>k6_vus</code> это gauge <a class="cite" href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">[3]</a>.</p>
+
+<h2>Вопрос 5: сигнал. Карта всех используемых метрик</h2>
+
+<p>Google SRE выделяет четыре «golden signals»: latency, traffic, errors, saturation <a class="cite" href="https://sre.google/sre-book/monitoring-distributed-systems/">[5]</a>. Load test отвечает на вопрос «при какой нагрузке сайт перестаёт успевать и что ломается первым» (<code>loadtest/HOW-IT-WORKS.md</code>). Каждая метрика стека попадает в одну клетку.</p>
+
+<figure>
+<svg viewBox="0 0 720 470" role="img" aria-label="Четыре сигнала">
+  <style>
+    .q{fill:#fff;stroke:#e4e0d6;stroke-width:1.5}
+    .qh{font:600 15px -apple-system,system-ui,sans-serif;fill:#1d1d1f}
+    .qs{font:11.5px -apple-system,system-ui,sans-serif;fill:#6b6b70}
+    .m{font:12px ui-monospace,Menlo,monospace}
+    .mc{fill:#2f6db3}.mg{fill:#c27c0e}.mp{fill:#7b4fa8}
+  </style>
+  <rect class="q" x="10" y="10" width="345" height="210" rx="8"/>
+  <text class="qh" x="25" y="35">Traffic · сколько работы</text>
+  <text class="qs" x="25" y="53">вопрос: сколько запросов пришло и сделано?</text>
+  <text class="m mc" x="25" y="80">k6_http_reqs_total</text>
+  <text class="m mc" x="25" y="100">k6_iterations_total</text>
+  <text class="m mc" x="25" y="120">pg_stat_database_xact_commit</text>
+  <text class="m mc" x="25" y="140">pg_stat_database_tup_fetched / _returned</text>
+  <text class="m mc" x="25" y="160">pg_stat_database_tup_inserted / _updated</text>
+  <text class="m mc" x="25" y="180">pg_stat_statements_calls_total</text>
+  <text class="m mg" x="25" y="200">k6_vus</text>
+
+  <rect class="q" x="365" y="10" width="345" height="210" rx="8"/>
+  <text class="qh" x="380" y="35">Latency · как долго</text>
+  <text class="qs" x="380" y="53">вопрос: сколько ждёт пользователь?</text>
+  <text class="m mp" x="380" y="80">k6_http_req_duration_p50/p95/p99/max</text>
+  <text class="m mp" x="380" y="100">k6_http_req_waiting_p95 (ответ сервера)</text>
+  <text class="m mp" x="380" y="120">k6_iteration_duration_p95</text>
+  <text class="m mc" x="380" y="140">pg_stat_statements_seconds_total</text>
+  <text class="m mg" x="380" y="160">pg_stat_activity_max_tx_duration</text>
+
+  <rect class="q" x="10" y="230" width="345" height="230" rx="8"/>
+  <text class="qh" x="25" y="255">Errors · что не удалось</text>
+  <text class="qs" x="25" y="273">вопрос: какая доля работы провалилась?</text>
+  <text class="m mg" x="25" y="300">k6_http_req_failed_rate</text>
+  <text class="m mg" x="25" y="320">k6_checks_rate</text>
+  <text class="m mc" x="25" y="340">k6_dropped_iterations_total</text>
+  <text class="m mc" x="25" y="360">pg_stat_database_xact_rollback</text>
+  <text class="m mc" x="25" y="380">pg_stat_database_deadlocks</text>
+  <text class="m mc" x="25" y="400">container_oom_events_total</text>
+  <text class="m mg" x="25" y="420">up (0 = источник недоступен)</text>
+
+  <rect class="q" x="365" y="230" width="345" height="230" rx="8"/>
+  <text class="qh" x="380" y="255">Saturation · насколько полно</text>
+  <text class="qs" x="380" y="273">вопрос: какой ресурс кончается первым?</text>
+  <text class="m mc" x="380" y="300">container_cpu_usage_seconds_total</text>
+  <text class="m mc" x="380" y="320">container_pressure_cpu_waiting_…</text>
+  <text class="m mc" x="380" y="340">container_pressure_io_waiting_…</text>
+  <text class="m mg" x="380" y="360">container_memory_working_set_bytes</text>
+  <text class="m mg" x="380" y="380">pg_stat_activity_count{state}</text>
+  <text class="m mg" x="380" y="400">pg_locks_count{mode}</text>
+  <text class="m mc" x="380" y="420">pg_stat_database_blks_hit / _read</text>
+  <text class="m mc" x="380" y="440">pg_stat_database_temp_bytes</text>
+</svg>
+<figcaption>Цвет имени это тип: <span style="color:#2f6db3">синий counter</span>, <span style="color:#c27c0e">жёлтый gauge</span>, <span style="color:#7b4fa8">фиолетовый готовая статистика k6</span>. Полный разбор каждой метрики в <a href="../reference/prometheus-metrics-catalog.html">справочнике</a>.</figcaption>
+</figure>
+
+<h3>Три пары, которые легко спутать</h3>
+
+<p><strong>Waiting и stalled в PSI.</strong> PSI (Pressure Stall Information) это учёт ядра Linux: сколько времени задачи ждали ресурс. Строка «some» значит, что ждала хотя бы одна задача. Строка «full» значит, что все задачи стояли одновременно <a class="cite" href="https://docs.kernel.org/accounting/psi.html">[6]</a>. В cAdvisor это <code>..._waiting_seconds_total</code> и <code>..._stalled_seconds_total</code>. Дашборд берёт waiting: это ранний сигнал.</p>
+
+<p><strong>CPU usage и CPU pressure.</strong> Usage говорит, сколько ядер занято. Pressure говорит, сколько времени задачи стояли в очереди за CPU. Usage у лимита плюс pressure больше нуля означает, что контейнеру не хватает CPU. Usage у лимита и pressure около нуля означает, что контейнер просто загружен полностью.</p>
+
+<p><strong>blks_hit и blks_read.</strong> Оба counter. Hit это блок нашёлся в shared_buffers, read это блок пришлось читать вне кэша Postgres <a class="cite" href="https://www.postgresql.org/docs/current/monitoring-stats.html">[7]</a>. По отдельности они говорят мало, смысл даёт доля: <code>rate(hit) / (rate(hit) + rate(read))</code>. Скрипт считает ниже 0.99 сигналом, что чтения идут на диск.</p>
+
+<h2>Проверьте себя</h2>
+
+<p>Отвечайте по памяти, не прокручивая вверх. Ошибка тоже полезна: она укрепляет память сильнее, чем перечитывание.</p>
+
+<p class="score"></p>
+
+<div class="quiz" data-answer="2">
+<div class="q">1. Что вернёт запрос <code>pg_stat_database_xact_commit</code> без функций?</div>
+<button class="opt">Число коммитов за последние пять секунд</button>
+<button class="opt">Число коммитов в секунду прямо сейчас</button>
+<button class="opt">Число коммитов с момента старта Postgres</button>
+<button class="opt">Среднее число коммитов за весь тест</button>
+<div class="fb">Это counter: он только копит. Скорость даёт <code>rate(...[30s])</code>, итог за тест даёт <code>increase(...[диапазон])</code>.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">2. Три экземпляра app, у каждого свой ряд <code>p95</code>. Какой запрос честно отвечает на вопрос «насколько плохо было»?</div>
+<button class="opt">max(k6_http_req_duration_p95)</button>
+<button class="opt">avg(k6_http_req_duration_p95)</button>
+<button class="opt">sum(k6_http_req_duration_p95)</button>
+<button class="opt">rate(k6_http_req_duration_p95[30s])</button>
+<div class="fb">Готовые перцентили нельзя сложить или усреднить. Max даёт верхнюю оценку. Rate к gauge неприменим.</div>
+</div>
+
+<div class="quiz" data-answer="3">
+<div class="q">3. App показывает <code>rate(container_cpu_usage_seconds_total[30s])</code> = 1.0 при лимите 2 ядра, а CPU pressure растёт. Что это значит?</div>
+<button class="opt">Приложению хватает CPU, всё в порядке</button>
+<button class="opt">Метрика сломана, pressure не может расти</button>
+<button class="opt">Postgres занял диск и тормозит всех</button>
+<button class="opt">App и db делят ядра и ждут друг друга</button>
+<div class="fb">В <code>docker-compose.loadtest.yml</code> app и db делят ядра из <code>SUT_CPUSET</code>. Одно ядро у app, но очередь за CPU уже есть: второе ядро занимает db.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+<div class="q">4. Как определить тип метрики <code>k6_http_reqs_total</code>, если в метаданных стоит «?»</div>
+<button class="opt">По метке scenario в каждом ряде метрики</button>
+<button class="opt">По суффиксу _total, это признак counter</button>
+<button class="opt">По флагу remote write у Prometheus</button>
+<button class="opt">По значению: если большое, то counter</button>
+<div class="fb">k6 называет свои Counter с суффиксом <code>_total</code>, Rate с суффиксом <code>_rate</code>, статистики Trend с суффиксами <code>_p95</code>, <code>_max</code>.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+<div class="q">5. <code>k6_dropped_iterations_total</code> растёт, а <code>k6_http_req_failed_rate</code> около нуля. Где проблема?</div>
+<button class="opt">Сервер отвечает ошибками на часть запросов</button>
+<button class="opt">Prometheus теряет точки при remote write</button>
+<button class="opt">k6 не успевает начать итерации: нет VU</button>
+<button class="opt">Postgres откатывает часть транзакций</button>
+<div class="fb">Dropped iteration это итерация, которую k6 не смог начать, потому что все VU заняты. Посмотрите на <code>k6_vus</code>: значение у MAX_VUS подтверждает это. Ответы сервера тут ни при чём.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">6. Почему cAdvisor запускается с <code>--disable_metrics=disk,diskIO,tcp,...</code>?</div>
+<button class="opt">Меньше рядов, меньше CPU у инструментов</button>
+<button class="opt">Эти метрики дублируют postgres-exporter</button>
+<button class="opt">Docker на macOS эти метрики не отдаёт</button>
+<button class="opt">Prometheus не принимает метрики диска</button>
+<div class="fb">Комментарий в compose: «to cut CPU use and series count». Каждая комбинация меток это отдельный ряд в памяти Prometheus.</div>
+</div>
+
+<div class="callout ask">
+<strong>Вопросы на понимание. Ответьте своими словами в чате, я проверю.</strong>
+<ol>
+<li>Почему для итогов теста <code>prom-summary.ts</code> берёт <code>increase(x[диапазон])</code>, а не «значение в конце минус значение в начале»? Что может случиться между этими двумя точками?</li>
+<li><code>pg_stat_activity_count</code> имеет метку <code>state</code>. Пул приложения равен 10. Что вы ожидаете увидеть в разбивке по <code>state</code>, когда пул становится узким местом?</li>
+<li>Если бы k6 отправлял не p95, а сырые бакеты гистограммы, какой из запретов этого урока исчез бы и почему?</li>
+</ol>
+</div>
+
+<h2>Что читать</h2>
+
+<p>Главный источник: <a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus: Metric types</a>, затем <a href="https://prometheus.io/docs/practices/histograms/">Histograms and summaries</a>. Это две короткие страницы, и они закрывают вопрос 2 полностью. Для вопроса 5 прочитайте раздел про golden signals в <a href="https://sre.google/sre-book/monitoring-distributed-systems/">SRE book, глава 6</a>.</p>
+
+<h3>Источники</h3>
+<ol class="meta">
+<li><a href="https://prometheus.io/docs/concepts/metric_types/">prometheus.io: Metric types</a></li>
+<li><a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#rate">prometheus.io: rate()</a></li>
+<li><a href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">Grafana k6: Prometheus remote write</a></li>
+<li><a href="https://prometheus.io/docs/practices/histograms/">prometheus.io: Histograms and summaries</a></li>
+<li><a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE book: Monitoring distributed systems</a></li>
+<li><a href="https://docs.kernel.org/accounting/psi.html">Linux kernel: PSI</a></li>
+<li><a href="https://www.postgresql.org/docs/current/monitoring-stats.html">PostgreSQL: The cumulative statistics system</a></li>
+</ol>
+
+<p class="sidenote">Непонятно что-то в уроке? Спросите меня в чате. Я ваш преподаватель и могу разобрать любую метрику на живых данных из вашего Prometheus.</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

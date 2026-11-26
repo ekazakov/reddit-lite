@@ -1,0 +1,87 @@
+/* Shared course stylesheet. Every lesson and reference links this file. */
+:root {
+  --ink: #1d1d1f;
+  --muted: #6b6b70;
+  --paper: #fffdf8;
+  --rule: #e4e0d6;
+  --accent: #a4442a;
+  --counter: #2f6db3;
+  --gauge: #c27c0e;
+  --pre: #7b4fa8;
+  --ok: #2e7d4f;
+  --bad: #b3261e;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+  color: var(--ink);
+  font: 18px/1.6 "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+h1 { font-size: 2.1em; line-height: 1.15; margin: 0 0 .2em; font-weight: 600; }
+h2 { font-size: 1.35em; margin: 2.2em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .2em; font-weight: 600; }
+h3 { font-size: 1.05em; margin: 1.6em 0 .3em; }
+p { margin: .6em 0; }
+.lede { color: var(--muted); font-size: 1.1em; font-style: italic; }
+.meta { color: var(--muted); font-size: .85em; font-family: -apple-system, system-ui, sans-serif; }
+nav.course { font-family: -apple-system, system-ui, sans-serif; font-size: .85em; margin-bottom: 2em; }
+nav.course a { margin-right: 1em; }
+a { color: var(--accent); }
+code { font-family: var(--mono); font-size: .82em; background: #f3efe5; padding: .05em .3em; border-radius: 3px; }
+pre { font-family: var(--mono); font-size: .8em; background: #f3efe5; padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
+figure { margin: 1.6em 0; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { color: var(--muted); font-size: .85em; margin-top: .4em; }
+.sidenote { border-left: 3px solid var(--rule); padding: .2em 0 .2em 14px; color: var(--muted); font-size: .92em; margin: 1em 0; }
+.cite { font-size: .75em; vertical-align: super; }
+table { border-collapse: collapse; width: 100%; font-size: .85em; margin: 1em 0; font-family: -apple-system, system-ui, sans-serif; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: .9em; }
+td code { white-space: nowrap; }
+.tag { display: inline-block; font: 600 .72em/1.6 -apple-system, system-ui, sans-serif; padding: 0 .5em; border-radius: 3px; color: #fff; }
+.tag.counter { background: var(--counter); }
+.tag.gauge { background: var(--gauge); }
+.tag.pre { background: var(--pre); }
+.callout { background: #f6f1e4; border-radius: 8px; padding: 14px 18px; margin: 1.4em 0; }
+.callout.ask { background: #eef3f8; }
+.pill { font-family: -apple-system, system-ui, sans-serif; font-size: .8em; }
+
+/* Quiz component (see quiz.js) */
+.quiz { border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; margin: 1.4em 0; background: #fff; }
+.quiz .q { font-weight: 600; margin-bottom: .6em; }
+.quiz button.opt {
+  display: block; width: 100%; text-align: left; margin: 6px 0; padding: 8px 12px;
+  font: inherit; font-size: .92em; background: #faf8f3; border: 1px solid var(--rule); border-radius: 6px; cursor: pointer;
+}
+.quiz button.opt:hover { background: #f2eee4; }
+.quiz button.opt.right { border-color: var(--ok); background: #e7f3ec; }
+.quiz button.opt.wrong { border-color: var(--bad); background: #f9e9e7; }
+.quiz .fb { margin-top: .6em; font-size: .92em; display: none; }
+.quiz .fb.show { display: block; }
+.quiz details { margin-top: .5em; font-size: .92em; }
+.score { font-family: -apple-system, system-ui, sans-serif; font-size: .9em; color: var(--muted); }
+
+/* Interactive widget frame (see viz.js) */
+.widget { border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin: 1.4em 0; background: #fff; }
+.widget svg { width: 100%; height: auto; display: block; }
+.widget .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font: .85em -apple-system, system-ui, sans-serif; margin-top: 8px; }
+.widget input[type=range] { width: 220px; accent-color: var(--accent); }
+.widget button { font: .85em -apple-system, system-ui, sans-serif; padding: 4px 10px; border: 1px solid var(--rule); background: #faf8f3; border-radius: 5px; cursor: pointer; }
+.widget .readout { font: .85em/1.5 var(--mono); background: #f6f3ea; border-radius: 6px; padding: 8px 10px; margin-top: 8px; white-space: pre-wrap; }
+.widget .hint { color: var(--muted); font-size: .8em; margin: 0 0 6px; font-family: -apple-system, system-ui, sans-serif; }
+.steps { counter-reset: s; list-style: none; padding-left: 0; }
+.steps li { counter-increment: s; position: relative; padding-left: 2.2em; margin: .5em 0; }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: .1em; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--ink); color: #fff; font: 600 .8em/1.6em -apple-system, system-ui, sans-serif; text-align: center; }
+.term { font-weight: 600; }
+.lessons-nav { display: flex; justify-content: space-between; font: .9em -apple-system, system-ui, sans-serif; margin-top: 3em; border-top: 1px solid var(--rule); padding-top: 1em; }
+
+@media print {
+  .widget .controls { display: none; }
+  body { max-width: none; padding: 0; font-size: 11pt; }
+  nav.course, .quiz button.opt:hover { display: none; }
+  h2 { break-after: avoid; }
+  figure, table, .quiz { break-inside: avoid; }
+}

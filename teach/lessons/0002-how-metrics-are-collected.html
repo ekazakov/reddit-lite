@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 2. Как k6 и Prometheus собирают метрики</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<nav class="course">
+  <a href="0002-how-metrics-are-collected.html"><b>2. Сбор</b></a>
+  <a href="0003-counter-to-rate.html">3. Rate</a>
+  <a href="0004-percentile.html">4. Перцентиль</a>
+  <a href="0005-histogram-and-summary.html">5. Histogram и summary</a>
+  <a href="0001-prometheus-metrics-from-first-principles.html">1. Обзор стека</a>
+  <a href="../reference/prometheus-metrics-catalog.html">Справочник</a>
+</nav>
+
+<h1>Как k6 и Prometheus собирают метрики</h1>
+<p class="lede">Prometheus не видит, что происходит в системе. Он видит только числа, которые ему показали в отдельные моменты. Весь урок про то, какие это числа и когда их показывают.</p>
+<p class="meta">Урок 2 из серии основ · ~15 минут · не требует знаний статистики</p>
+
+<div class="callout">
+<strong>Цель урока.</strong> Вы объясняете своими словами три вещи: что такое точка и временной ряд, чем pull отличается от push, и почему Prometheus не знает, что было между двумя опросами.
+</div>
+
+<h2>Три слова, на которых стоит всё</h2>
+
+<p><span class="term">Метрика</span> это число с именем, которое меняется во времени. Например, <code>k6_http_reqs_total</code>: сколько HTTP запросов отправил k6.</p>
+
+<p><span class="term">Точка</span> (sample) это пара «момент времени и значение». Например, «в 07:45:30 значение было 7».</p>
+
+<p><span class="term">Временной ряд</span> (time series) это все точки одной метрики с одним набором меток, по порядку времени. <span class="term">Метки</span> (labels) это пары «ключ = значение», которые уточняют, что именно считали.</p>
+
+<figure>
+<svg viewBox="0 0 720 200" role="img" aria-label="Одна метрика, несколько рядов">
+  <style>.m{font:13px ui-monospace,Menlo,monospace}.s{font:12px -apple-system,system-ui,sans-serif;fill:#6b6b70}</style>
+  <text class="m" x="10" y="24"><tspan fill="#a4442a">k6_http_reqs_total</tspan>{action="feed", status="200"}</text>
+  <text class="m" x="440" y="24" fill="#2f6db3">1 → 2 → 3 → 4 → …</text>
+  <text class="m" x="10" y="54"><tspan fill="#a4442a">k6_http_reqs_total</tspan>{action="vote", status="200"}</text>
+  <text class="m" x="440" y="54" fill="#2f6db3">1 → 2 → 3 → 4 → …</text>
+  <text class="m" x="10" y="84"><tspan fill="#a4442a">k6_http_reqs_total</tspan>{action="comment", status="302"}</text>
+  <text class="m" x="440" y="84" fill="#2f6db3">1 → 2 → 3 → 4 → …</text>
+  <line x1="10" y1="104" x2="710" y2="104" stroke="#e4e0d6"/>
+  <text class="s" x="10" y="128">Красное: имя метрики. Одно имя.</text>
+  <text class="s" x="10" y="148">В фигурных скобках: метки. Каждая уникальная комбинация меток это отдельный временной ряд.</text>
+  <text class="s" x="10" y="168">Синее: точки ряда во времени. В вашем smoke-тесте у этой метрики 10 рядов, по одному на действие бота.</text>
+</svg>
+<figcaption>Пример из вашего Prometheus: прогон <code>smoke-20261120-084517</code>.</figcaption>
+</figure>
+
+<p>Prometheus хранит именно ряды. Вопрос «сколько запросов было» всегда уточняется: каких, с каким статусом, в какой момент.</p>
+
+<h2>Pull: Prometheus приходит сам</h2>
+
+<p>Для Postgres и контейнеров Prometheus работает по модели <span class="term">pull</span> (вытягивание). Каждые 5 секунд (<code>scrape_interval: 5s</code> в <code>loadtest/prometheus.yml</code>) он делает HTTP запрос <code>GET /metrics</code> к каждой цели. Этот опрос называется <span class="term">scrape</span>.</p>
+
+<ol class="steps">
+<li>Postgres сам ведёт внутренние счётчики. Например, в таблице <code>pg_stat_database</code> есть колонка <code>xact_commit</code>: сколько транзакций подтверждено с момента старта.</li>
+<li><span class="term">Экспортер</span> это маленькая программа-переводчик. postgres-exporter на каждый scrape выполняет SQL к Postgres и переводит ответ в текстовый формат Prometheus.</li>
+<li>Prometheus получает текст, ставит на каждую строку время опроса и сохраняет точки.</li>
+</ol>
+
+<p>Ответ экспортера выглядит так <a class="cite" href="https://prometheus.io/docs/instrumenting/exposition_formats/">[1]</a>. Это обычный текст, его можно открыть в браузере:</p>
+
+<pre># HELP pg_stat_database_xact_commit Number of transactions in this database that have been committed
+# TYPE pg_stat_database_xact_commit counter
+pg_stat_database_xact_commit{datname="reddit_lite"} 4812033
+pg_stat_database_xact_commit{datname="postgres"} 1290</pre>
+
+<p>Строка <code># TYPE</code> сообщает тип. Строки ниже это текущие значения рядов. Времени в ответе нет: его добавляет Prometheus в момент опроса.</p>
+
+<h2>Push: k6 отправляет сам</h2>
+
+<p>k6 работает по модели <span class="term">push</span> (отправка). Prometheus к нему не ходит. Причина в том, что k6 живёт только во время теста, и последний отрезок теста мог бы пропасть между двумя опросами. Поэтому Prometheus запущен с флагом <code>--web.enable-remote-write-receiver</code>: он принимает данные на <code>/api/v1/write</code>.</p>
+
+<figure>
+<svg viewBox="0 0 720 230" role="img" aria-label="Как k6 копит и отправляет">
+  <style>.s{font:12px -apple-system,system-ui,sans-serif;fill:#6b6b70}.h{font:600 13px -apple-system,system-ui,sans-serif;fill:#1d1d1f}</style>
+  <text class="h" x="10" y="20">Каждый HTTP запрос k6 записывает в память</text>
+  <g fill="#a4442a">
+    <rect x="20" y="34" width="3" height="22"/><rect x="38" y="34" width="3" height="22"/><rect x="47" y="34" width="3" height="22"/><rect x="80" y="34" width="3" height="22"/><rect x="101" y="34" width="3" height="22"/><rect x="130" y="34" width="3" height="22"/><rect x="138" y="34" width="3" height="22"/><rect x="170" y="34" width="3" height="22"/><rect x="199" y="34" width="3" height="22"/><rect x="214" y="34" width="3" height="22"/><rect x="250" y="34" width="3" height="22"/><rect x="262" y="34" width="3" height="22"/><rect x="300" y="34" width="3" height="22"/><rect x="331" y="34" width="3" height="22"/><rect x="345" y="34" width="3" height="22"/><rect x="380" y="34" width="3" height="22"/><rect x="412" y="34" width="3" height="22"/><rect x="420" y="34" width="3" height="22"/><rect x="455" y="34" width="3" height="22"/><rect x="487" y="34" width="3" height="22"/><rect x="520" y="34" width="3" height="22"/><rect x="530" y="34" width="3" height="22"/><rect x="566" y="34" width="3" height="22"/><rect x="600" y="34" width="3" height="22"/><rect x="633" y="34" width="3" height="22"/><rect x="660" y="34" width="3" height="22"/><rect x="690" y="34" width="3" height="22"/>
+  </g>
+  <line x1="10" y1="66" x2="710" y2="66" stroke="#bbb"/>
+  <g stroke="#2f6db3" stroke-width="2" stroke-dasharray="4 3"><line x1="236" y1="28" x2="236" y2="110"/><line x1="472" y1="28" x2="472" y2="110"/><line x1="708" y1="28" x2="708" y2="110"/></g>
+  <text class="s" x="236" y="82" text-anchor="middle">5 с</text><text class="s" x="472" y="82" text-anchor="middle">10 с</text><text class="s" x="700" y="82" text-anchor="end">15 с</text>
+  <text class="s" x="236" y="125" text-anchor="middle" fill="#2f6db3">отправка</text><text class="s" x="472" y="125" text-anchor="middle" fill="#2f6db3">отправка</text><text class="s" x="700" y="125" text-anchor="end" fill="#2f6db3">отправка</text>
+  <text class="h" x="10" y="160">Что уходит в Prometheus при каждой отправке</text>
+  <text class="s" x="10" y="182">• k6_http_reqs_total = сколько запросов всего с начала теста (counter)</text>
+  <text class="s" x="10" y="202">• k6_http_req_duration_p95 = перцентиль по всем запросам с начала теста (уже готовое число)</text>
+  <text class="s" x="10" y="222">• k6_vus = сколько виртуальных пользователей активно сейчас (gauge)</text>
+</svg>
+<figcaption>Интервал отправки задаёт <code>K6_PROMETHEUS_RW_PUSH_INTERVAL</code>, по умолчанию 5 секунд <a class="cite" href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">[2]</a>. Сырые длительности отдельных запросов в Prometheus не попадают. Только итоговые числа.</figcaption>
+</figure>
+
+<p class="sidenote">Важная деталь, к которой вернётся урок 5. По исходному коду k6 перцентиль при отправке считается по всем запросам с начала теста, а не за последние 5 секунд <a class="cite" href="https://github.com/grafana/k6/blob/master/internal/output/prometheusrw/remotewrite/remotewrite.go">[3]</a>. На ваших данных это видно: <code>k6_http_req_duration_max</code> ни в одном ряду ни разу не уменьшился за весь прогон.</p>
+
+<h2>Prometheus видит только моменты опроса</h2>
+
+<p>Это главное следствие обеих моделей. Между двумя точками Prometheus ничего не знает. Поиграйте с виджетом: красные отметки это настоящие события, синие точки это то, что сохранил Prometheus.</p>
+
+<div class="widget" id="w-scrape">
+<p class="hint">Один и тот же отрезок в 60 секунд. Переключите тип и меняйте интервал опроса.</p>
+<svg id="scrape-svg"></svg>
+<div class="controls">
+  <label><input type="radio" name="kind" value="counter" checked> counter: всего запросов</label>
+  <label><input type="radio" name="kind" value="gauge"> gauge: запросов в работе сейчас</label>
+  <label>интервал опроса <input type="range" id="scrape-int" min="1" max="15" value="5"> <b id="scrape-int-v">5</b> с</label>
+</div>
+<div class="readout" id="scrape-out"></div>
+</div>
+
+<p>Обратите внимание на разницу. С gauge короткий всплеск между опросами пропадает навсегда. С counter число в следующей точке всё равно выросло на все пропущенные события. Поэтому для подсчёта событий используют counter. Об этом урок 3.</p>
+
+<h2>Проверьте себя</h2>
+<p class="score"></p>
+
+<div class="quiz" data-answer="1">
+<div class="q">1. Сколько временных рядов даёт метрика с метками <code>action</code> (5 значений) и <code>status</code> (2 значения), если встречаются все сочетания?</div>
+<button class="opt">Один ряд, потому что имя метрики одно</button>
+<button class="opt">Десять рядов, по одному на сочетание</button>
+<button class="opt">Семь рядов, пять плюс два значения</button>
+<button class="opt">Два ряда, по одному на каждый статус</button>
+<div class="fb">Каждая уникальная комбинация меток это отдельный ряд: 5 × 2 = 10. Поэтому метки с большим числом значений (например, id пользователя) раздувают Prometheus.</div>
+</div>
+
+<div class="quiz" data-answer="3">
+<div class="q">2. Кто ставит время на точку <code>pg_stat_database_xact_commit</code>?</div>
+<button class="opt">Postgres, когда подтверждает транзакцию</button>
+<button class="opt">postgres-exporter, когда выполняет SQL</button>
+<button class="opt">Grafana, когда рисует график на панели</button>
+<button class="opt">Prometheus, когда опрашивает экспортер</button>
+<div class="fb">В тексте ответа экспортера времени нет. Prometheus добавляет время опроса.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">3. Почему k6 отправляет метрики сам, а не ждёт опроса?</div>
+<button class="opt">Тест короткий, конец может пропасть</button>
+<button class="opt">Prometheus не умеет опрашивать k6</button>
+<button class="opt">Так быстрее для запросов к приложению</button>
+<button class="opt">Push точнее считает перцентили</button>
+<div class="fb">k6 завершается вместе с тестом. Если бы Prometheus опрашивал k6, последний отрезок до опроса мог бы потеряться.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+<div class="q">4. Между двумя опросами было 300 запросов, но все закончились до второго опроса. Что увидит gauge «запросов в работе сейчас»?</div>
+<button class="opt">Сумму 300 запросов во второй точке</button>
+<button class="opt">Среднее число запросов за интервал</button>
+<button class="opt">Ничего из этого всплеска, ноль</button>
+<button class="opt">Максимум запросов за весь интервал</button>
+<div class="fb">Gauge показывает только состояние в момент опроса. Всё, что началось и закончилось между опросами, для него не существует.</div>
+</div>
+
+<div class="callout ask">
+<strong>Вопрос на понимание. Ответьте своими словами в чате.</strong>
+<p>В <code>docker-compose.loadtest.yml</code> cAdvisor запущен с <code>--housekeeping_interval=5s</code>, и Prometheus опрашивает его тоже раз в 5 секунд. Что могло бы пойти не так, если бы cAdvisor обновлял свои числа раз в 30 секунд, а Prometheus опрашивал его раз в 5?</p>
+</div>
+
+<h2>Что читать</h2>
+<p>Главный источник: <a href="https://prometheus.io/docs/concepts/data_model/">Prometheus: Data model</a>. Одна страница про имена, метки и ряды. Дальше <a href="https://prometheus.io/docs/instrumenting/exposition_formats/">формат текста экспортера</a>.</p>
+
+<h3>Источники</h3>
+<ol class="meta">
+<li><a href="https://prometheus.io/docs/instrumenting/exposition_formats/">prometheus.io: Exposition formats</a></li>
+<li><a href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">Grafana k6: Prometheus remote write</a></li>
+<li><a href="https://github.com/grafana/k6/blob/master/internal/output/prometheusrw/remotewrite/remotewrite.go">k6 source: remotewrite.go</a></li>
+</ol>
+
+<p class="sidenote">Что-то непонятно? Спросите меня в чате. Я ваш преподаватель.</p>
+
+<div class="lessons-nav"><a href="0001-prometheus-metrics-from-first-principles.html">← Урок 1</a><a href="0003-counter-to-rate.html">Урок 3: от counter к rate →</a></div>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/viz.js"></script>
+<script>
+(function () {
+  // Deterministic pseudo-random requests: start time and duration in seconds.
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const reqs = [];
+  for (let t = 0; t < 60; t += 0.35 + rnd() * 1.3) reqs.push([t, 0.2 + rnd() * 0.6]);
+  // A burst between scrapes: 25 short requests around 22-23 s.
+  for (let k = 0; k < 25; k++) reqs.push([22.1 + k * 0.03, 0.4 + rnd() * 0.3]);
+  reqs.sort((a, b) => a[0] - b[0]);
+
+  const counterAt = (t) => reqs.filter((r) => r[0] + r[1] <= t).length;
+  const gaugeAt = (t) => reqs.filter((r) => r[0] <= t && r[0] + r[1] > t).length;
+
+  function draw() {
+    const kind = document.querySelector('input[name=kind]:checked').value;
+    const step = +document.getElementById('scrape-int').value;
+    document.getElementById('scrape-int-v').textContent = step;
+    const f = kind === 'counter' ? counterAt : gaugeAt;
+    const s = Viz.svg('#scrape-svg', 720, 260);
+    const X = Viz.scale(0, 60, 40, 700);
+    let maxY = 0; const truth = [];
+    for (let t = 0; t <= 60; t += 0.05) { const v = f(t); truth.push([t, v]); maxY = Math.max(maxY, v); }
+    const Y = Viz.scale(0, maxY * 1.1 || 1, 220, 20);
+    Viz.hline(s, 220, 40, 700);
+    for (let t = 0; t <= 60; t += 10) { Viz.vline(s, X(t), 220, 225); Viz.text(s, X(t), 240, t + ' с', { anchor: 'middle' }); }
+    Viz.text(s, 36, Y(maxY), String(maxY), { anchor: 'end' });
+    Viz.text(s, 36, 224, '0', { anchor: 'end' });
+    // Real events as red ticks along the bottom.
+    reqs.forEach((r) => Viz.rect(s, X(r[0]), 214, 1.5, 6, { color: '#a4442a' }));
+    // The truth, thin and grey.
+    Viz.line(s, truth.map(([t, v]) => [X(t), Y(v)]), { color: '#c9c4b8', width: 1.2 });
+    // What Prometheus stores.
+    const pts = [];
+    for (let t = step; t <= 60; t += step) pts.push([t, f(t)]);
+    pts.forEach(([t]) => Viz.vline(s, X(t), 20, 220, { color: '#2f6db3', dash: '2 4' }));
+    Viz.line(s, pts.map(([t, v]) => [X(t), Y(v)]), { color: '#2f6db3', width: 2 });
+    pts.forEach(([t, v]) => Viz.dot(s, X(t), Y(v), { color: '#2f6db3' }));
+    Viz.text(s, 44, 16, kind === 'counter' ? 'серая линия: настоящее значение · синие точки: что сохранил Prometheus' : 'серая линия: настоящее значение · синие точки: что сохранил Prometheus', { size: 11 });
+
+    const trueMax = Math.max(...truth.map((x) => x[1]));
+    const seenMax = Math.max(...pts.map((x) => x[1]));
+    document.getElementById('scrape-out').textContent = kind === 'counter'
+      ? `Точек сохранено: ${pts.length}. Всего запросов к 60 с: ${counterAt(60)}.\nCounter в последней точке: ${pts.at(-1)[1]}. Ни одно событие не потерялось: каждое увеличило число.`
+      : `Точек сохранено: ${pts.length}. Настоящий пик: ${trueMax} запросов одновременно (около 22 с).\nПик в сохранённых точках: ${seenMax}. ${seenMax < trueMax ? 'Всплеск пропал между опросами.' : 'Опрос случайно попал на всплеск.'}`;
+  }
+  document.querySelectorAll('#w-scrape input').forEach((i) => i.addEventListener('input', draw));
+  draw();
+})();
+</script>
+</body>
+</html>

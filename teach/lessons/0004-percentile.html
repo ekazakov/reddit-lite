@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 4. Что такое перцентиль и как его считает k6</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<nav class="course">
+  <a href="0002-how-metrics-are-collected.html">2. Сбор</a>
+  <a href="0003-counter-to-rate.html">3. Rate</a>
+  <a href="0004-percentile.html"><b>4. Перцентиль</b></a>
+  <a href="0005-histogram-and-summary.html">5. Histogram и summary</a>
+  <a href="0001-prometheus-metrics-from-first-principles.html">1. Обзор стека</a>
+  <a href="../reference/prometheus-metrics-catalog.html">Справочник</a>
+</nav>
+
+<h1>Что такое перцентиль и как его считает k6</h1>
+<p class="lede">Один запрос длится 3 мс, другой 400 мс. Одним числом «время ответа» не описать. Перцентиль это способ описать много разных чисел честно.</p>
+<p class="meta">Урок 4 · ~20 минут · статистика с нуля, только сортировка и пропорция</p>
+
+<div class="callout">
+<strong>Цель урока.</strong> Вы берёте десять чисел и руками считаете p50 и p90 так же, как это делает k6. И объясняете, почему в нагрузочных тестах смотрят на p95, а не на среднее.
+</div>
+
+<h2>Много измерений одного и того же</h2>
+
+<p>Вот десять настоящих длительностей запроса <code>GET /</code> (лента) из вашего прогона <code>stairs-20261119-232753</code>, в миллисекундах, в порядке выполнения:</p>
+
+<pre>1.8  2.5  2.7  3.6  5.9  4.2  5.6  8.2  4.9  3.9</pre>
+
+<p>Запросы одинаковые, а время разное: процессор был занят чем-то ещё, данные были или не были в кэше. Набор значений и то, как они разбросаны, называют <span class="term">распределением</span>.</p>
+
+<h2>Среднее и медиана</h2>
+
+<p><span class="term">Среднее</span> это сумма, делённая на количество: 43,3 / 10 = 4,33 мс.</p>
+
+<p><span class="term">Медиана</span> это значение посередине, если выстроить числа по возрастанию. Половина запросов быстрее медианы, половина медленнее.</p>
+
+<div class="widget" id="w-mean">
+<p class="hint">Каждая точка это один запрос. Добавьте один медленный запрос и посмотрите, что случится со средним и с медианой.</p>
+<svg id="mean-svg"></svg>
+<div class="controls">
+  <button id="add-slow">+ медленный запрос 400 мс</button>
+  <button id="reset-slow">сбросить</button>
+</div>
+<div class="readout" id="mean-out"></div>
+</div>
+
+<p>Один медленный запрос из одиннадцати увеличил среднее почти в десять раз. Среднее описывает не «типичный» запрос, а смесь всех. Медиана почти не изменилась, но она ничего не говорит о медленных запросах. Нужен инструмент, который говорит о медленной части прямо.</p>
+
+<h2>Перцентиль</h2>
+
+<p><span class="term">Перцентиль p</span> это такое значение, что p процентов измерений не больше него. Запись p95 = 7,2 мс читается так: «95 % запросов уложились в 7,2 мс, 5 % были медленнее».</p>
+
+<ul>
+<li>p50 это медиана.</li>
+<li>p95 показывает «одного из двадцати» самых медленных.</li>
+<li>p99 показывает «одного из ста».</li>
+<li>max это p100, самый медленный запрос.</li>
+</ul>
+
+<p>Медленную часть распределения называют <span class="term">хвостом</span>. На сайте с тысячами запросов в секунду 5 % это десятки пользователей каждую секунду. Поэтому <code>loadtest/k6</code> и дашборды смотрят на p95 и p99, а не на среднее <a class="cite" href="https://sre.google/sre-book/monitoring-distributed-systems/">[1]</a>.</p>
+
+<h2>Как именно k6 считает перцентиль</h2>
+
+<p>Есть несколько способов посчитать перцентиль, и они дают немного разные ответы. k6 использует один конкретный. Вот функция из исходного кода k6, <code>metrics/sink.go</code> <a class="cite" href="https://github.com/grafana/k6/blob/master/metrics/sink.go">[2]</a>, сокращённо:</p>
+
+<pre>func (t *TrendSink) P(pct float64) float64 {
+    sort.Float64s(t.values)              // 1. отсортировать все значения
+    i := pct * (float64(t.count) - 1.0)  // 2. дробный номер позиции
+    j := t.values[int(math.Floor(i))]    // 3. сосед слева
+    k := t.values[int(math.Ceil(i))]     //    сосед справа
+    f := i - math.Floor(i)               // 4. дробная часть номера
+    return j + (k-j)*f                   // 5. точка между соседями
+}</pre>
+
+<p>Обратите внимание на первую строку: k6 хранит каждое значение в памяти (<code>values []float64</code>) и сортирует их все. Это точный способ, но дорогой. В уроке 5 это станет важно.</p>
+
+<p>Посчитаем p90 по нашим десяти числам вручную:</p>
+
+<ol class="steps">
+<li>Сортируем: 1.8, 2.5, 2.7, 3.6, 3.9, 4.2, 4.9, 5.6, 5.9, 8.2. Позиции нумеруются с нуля: от 0 до 9.</li>
+<li>Номер позиции: i = 0,90 × (10 − 1) = 8,1.</li>
+<li>Соседи: позиция 8 это 5.9, позиция 9 это 8.2.</li>
+<li>Дробная часть: 0,1. Значит, берём 10 % пути от 5.9 к 8.2.</li>
+<li>p90 = 5.9 + (8.2 − 5.9) × 0,1 = 5.9 + 0,23 = <b>6,13 мс</b>.</li>
+</ol>
+
+<div class="widget" id="w-pct">
+<p class="hint">Двигайте ползунок. Виджет считает по той же формуле, что k6.</p>
+<svg id="pct-svg"></svg>
+<div class="controls">
+  <label>перцентиль <input type="range" id="p" min="0" max="100" value="95"> p<b id="p-v"></b></label>
+</div>
+<div class="readout" id="pct-out"></div>
+</div>
+
+<h2>Проверьте себя</h2>
+<p class="score"></p>
+
+<div class="quiz" data-answer="1">
+<div class="q">1. Посчитайте p50 (медиану) по тем же десяти числам формулой k6. Отвечайте по памяти о шагах, не трогая ползунок.</div>
+<button class="opt">3,90 мс</button>
+<button class="opt">4,05 мс</button>
+<button class="opt">4,33 мс</button>
+<button class="opt">4,20 мс</button>
+<div class="fb">i = 0,5 × 9 = 4,5. Соседи: позиция 4 это 3.9, позиция 5 это 4.2. Половина пути: 3.9 + 0,3 × 0,5 = 4,05. Значение 4,33 это среднее.</div>
+</div>
+
+<div class="quiz" data-answer="3">
+<div class="q">2. Дашборд показывает p95 = 300 мс для <code>POST /submit</code>. Что это значит?</div>
+<button class="opt">Средний запрос длился 300 мс</button>
+<button class="opt">95 запросов длились ровно 300 мс</button>
+<button class="opt">5 % запросов уложились в 300 мс</button>
+<button class="opt">95 % запросов уложились в 300 мс</button>
+<div class="fb">p95 это граница: 95 % измерений не больше неё, 5 % больше.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">3. 99 запросов по 10 мс и один по 5000 мс. Какое описание честнее для пользователя?</div>
+<button class="opt">p50 = 10 мс, max = 5000 мс</button>
+<button class="opt">среднее = 59,9 мс, других нет</button>
+<button class="opt">p50 = 10 мс, других чисел нет</button>
+<button class="opt">среднее = 10 мс, max = 5000 мс</button>
+<div class="fb">Среднее 59,9 мс не похоже ни на один настоящий запрос. Пара «типичный и худший» описывает и обычный опыт, и хвост.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+<div class="q">4. Сколько значений k6 хранит в памяти, чтобы посчитать p95 за тест на 140 000 запросов?</div>
+<button class="opt">Только текущее значение p95</button>
+<button class="opt">Последние 5 секунд запросов</button>
+<button class="opt">Все 140 000 длительностей</button>
+<button class="opt">Двадцать самых медленных запросов</button>
+<div class="fb">TrendSink добавляет каждое значение в массив и сортирует его. Точно, но память растёт с числом запросов. Ваш прогон stairs-20261119-232753 содержит 140 166 запросов.</div>
+</div>
+
+<div class="callout ask">
+<strong>Вопрос на понимание. Ответьте своими словами в чате.</strong>
+<p>У вас 4 запроса: 10, 20, 30, 1000 мс. Посчитайте p95 по формуле k6. Затем объясните, почему при малом числе запросов p95 почти совпадает с max.</p>
+</div>
+
+<h2>Что читать</h2>
+<p>Главный источник: <a href="https://sre.google/sre-book/service-level-objectives/">SRE book, глава 4 «Service Level Objectives»</a>, раздел про индикаторы. Там коротко объяснено, почему смотрят на перцентили, а не на среднее. Формулу k6 можно проверить в <a href="https://github.com/grafana/k6/blob/master/metrics/sink.go">metrics/sink.go</a>.</p>
+
+<h3>Источники</h3>
+<ol class="meta">
+<li><a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE book: Monitoring distributed systems</a></li>
+<li><a href="https://github.com/grafana/k6/blob/master/metrics/sink.go">k6 source: metrics/sink.go, TrendSink.P</a></li>
+</ol>
+
+<p class="sidenote">Что-то непонятно? Спросите меня в чате. Я ваш преподаватель.</p>
+
+<div class="lessons-nav"><a href="0003-counter-to-rate.html">← Урок 3: rate</a><a href="0005-histogram-and-summary.html">Урок 5: histogram и summary →</a></div>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/viz.js"></script>
+<script>
+(function () {
+  const base = [1.8, 2.5, 2.7, 3.6, 5.9, 4.2, 5.6, 8.2, 4.9, 3.9];
+  let vals = [...base];
+
+  function drawMean() {
+    const s = Viz.svg('#mean-svg', 720, 150);
+    const maxV = Math.max(...vals);
+    // Log-like scale keeps 2 ms and 400 ms both readable.
+    const X = (v) => 40 + (Math.log10(v + 1) / Math.log10(maxV + 1)) * 640;
+    Viz.hline(s, 80, 40, 690);
+    [1, 2, 5, 10, 20, 50, 100, 200, 400].filter((t) => t <= maxV * 1.2).forEach((t) => { Viz.vline(s, X(t), 80, 85); Viz.text(s, X(t), 100, t + ' мс', { anchor: 'middle', size: 11 }); });
+    vals.forEach((v, i) => Viz.dot(s, X(v), 70 - (i % 3) * 9, { color: v > 100 ? '#b3261e' : '#1d1d1f', r: 5 }));
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const med = Viz.k6Percentile(vals, 0.5).value;
+    Viz.vline(s, X(mean), 20, 80, { color: '#c27c0e', width: 2 });
+    Viz.text(s, X(mean) + 4, 30, 'среднее ' + Viz.fmt(mean, 1), { color: '#c27c0e', weight: 600 });
+    Viz.vline(s, X(med), 20, 80, { color: '#2f6db3', width: 2 });
+    Viz.text(s, X(med) - 4, 18, 'медиана ' + Viz.fmt(med, 2), { color: '#2f6db3', weight: 600, anchor: 'end' });
+    Viz.text(s, 40, 135, 'шкала сжата: каждое деление в ~2 раза больше предыдущего, иначе 400 мс не поместится', { size: 11 });
+    document.getElementById('mean-out').textContent =
+      `запросов: ${vals.length}\nсреднее = ${Viz.fmt(vals.reduce((a, b) => a + b, 0), 1)} / ${vals.length} = ${Viz.fmt(mean, 2)} мс\nмедиана = ${Viz.fmt(med, 2)} мс`;
+  }
+  document.getElementById('add-slow').onclick = () => { vals.push(400); drawMean(); };
+  document.getElementById('reset-slow').onclick = () => { vals = [...base]; drawMean(); };
+  drawMean();
+
+  function drawPct() {
+    const p = +document.getElementById('p').value;
+    document.getElementById('p-v').textContent = p;
+    const r = Viz.k6Percentile(base, p / 100);
+    const v = r.sorted;
+    const s = Viz.svg('#pct-svg', 720, 190);
+    const X = Viz.scale(0, 9, 60, 660);
+    const Y = Viz.scale(0, 9, 150, 30);
+    Viz.hline(s, 150, 40, 690);
+    v.forEach((val, idx) => {
+      const isN = idx === r.lo || idx === r.hi;
+      Viz.rect(s, X(idx) - 18, Y(val), 36, 150 - Y(val), { color: isN ? '#f0c9a8' : '#e9e5da' });
+      Viz.text(s, X(idx), Y(val) - 5, String(val), { anchor: 'middle', color: '#1d1d1f', size: 12 });
+      Viz.text(s, X(idx), 168, 'поз. ' + idx, { anchor: 'middle', size: 11 });
+    });
+    const xi = X(r.i);
+    Viz.vline(s, xi, 20, 150, { color: '#a4442a', width: 2 });
+    Viz.dot(s, xi, Y(r.value), { color: '#a4442a', r: 5 });
+    Viz.text(s, Math.min(xi + 6, 600), 22, `p${p} = ${Viz.fmt(r.value, 2)} мс`, { color: '#a4442a', weight: 600 });
+    Viz.text(s, 40, 186, 'высота столбика = длительность запроса, мс · столбики отсортированы', { size: 11 });
+    const f = r.i - r.lo;
+    document.getElementById('pct-out').textContent =
+      `i = ${Viz.fmt(p / 100, 2)} × (10 − 1) = ${Viz.fmt(r.i, 2)}\n` +
+      `соседи: поз. ${r.lo} = ${v[r.lo]}, поз. ${r.hi} = ${v[r.hi]}, дробная часть = ${Viz.fmt(f, 2)}\n` +
+      `p${p} = ${v[r.lo]} + (${v[r.hi]} − ${v[r.lo]}) × ${Viz.fmt(f, 2)} = ${Viz.fmt(r.value, 2)} мс`;
+  }
+  document.getElementById('p').addEventListener('input', drawPct);
+  drawPct();
+})();
+</script>
+</body>
+</html>
