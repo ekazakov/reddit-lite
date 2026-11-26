@@ -3,8 +3,8 @@
 # Keys that a line leaves out come from loadtest/.env.
 # If a line sets APP_MEM but not APP_HEAP_MB, the heap is 75% of APP_MEM.
 # If a line sets DB_MEM, shared_buffers is 25% and effective_cache_size is 75% of it, unless the line sets them.
-# SUT_CPUSET must not overlap TOOLS_CPUSET in loadtest/.env. To test 4 CPUs (0-3), first set
-# TOOLS_CPUSET=4-13 in loadtest/.env and run "scripts/loadtest/compose.sh up -d" so the tools move.
+# SUT_CPUSET must not overlap TOOLS_CPUSET. The default TOOLS_CPUSET=4-13 leaves CPUs 0-3 for app and db.
+# If loadtest/.env sets another TOOLS_CPUSET, keep it off the SUT_CPUSET cores.
 # The first line is the baseline in the report.
 
 # Pool size sweep on the production size (2 CPUs, 512 MB app, 1 GB db).

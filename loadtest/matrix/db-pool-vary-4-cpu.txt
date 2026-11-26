@@ -1,0 +1,13 @@
+# Example matrix for scripts/loadtest/matrix.sh. One variant per line: <name> KEY=VALUE ...
+# Keys: DB_POOL_MAX SUT_CPUSET APP_MEM APP_HEAP_MB DB_MEM DB_SHARED_BUFFERS DB_EFFECTIVE_CACHE_SIZE.
+# Keys that a line leaves out come from loadtest/.env.
+# If a line sets APP_MEM but not APP_HEAP_MB, the heap is 75% of APP_MEM.
+# If a line sets DB_MEM, shared_buffers is 25% and effective_cache_size is 75% of it, unless the line sets them.
+# SUT_CPUSET must not overlap TOOLS_CPUSET. The default TOOLS_CPUSET=4-13 leaves CPUs 0-3 for app and db.
+# If loadtest/.env sets another TOOLS_CPUSET, keep it off the SUT_CPUSET cores.
+# The first line is the baseline in the report.
+
+# Pool size sweep on the production size (4 CPUs, 512 MB app, 1 GB db).
+pool5         DB_POOL_MAX=5  SUT_CPUSET=0-3 APP_MEM=512m DB_MEM=1g
+pool10        DB_POOL_MAX=10 SUT_CPUSET=0-3 APP_MEM=512m DB_MEM=1g
+pool20        DB_POOL_MAX=20 SUT_CPUSET=0-3 APP_MEM=512m DB_MEM=1g

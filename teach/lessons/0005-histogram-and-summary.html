@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 5. Histogram и summary: как сжать распределение</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<nav class="course">
+  <a href="0002-how-metrics-are-collected.html">2. Сбор</a>
+  <a href="0003-counter-to-rate.html">3. Rate</a>
+  <a href="0004-percentile.html">4. Перцентиль</a>
+  <a href="0005-histogram-and-summary.html"><b>5. Histogram и summary</b></a>
+  <a href="0001-prometheus-metrics-from-first-principles.html">1. Обзор стека</a>
+  <a href="../reference/prometheus-metrics-catalog.html">Справочник</a>
+</nav>
+
+<h1>Histogram и summary: как сжать распределение</h1>
+<p class="lede">В уроке 4 k6 хранил каждую длительность и сортировал их все. Сервер с миллионами запросов так не может. Histogram и summary это два способа хранить распределение компактно. У каждого своя цена.</p>
+<p class="meta">Урок 5 · ~20 минут · опирается на уроки 3 и 4</p>
+
+<div class="callout">
+<strong>Цель урока.</strong> Вы объясняете, чем histogram отличается от summary, считаете оценку перцентиля по корзинам руками и понимаете, почему p95 на дашборде k6 запаздывает.
+</div>
+
+<h2>Summary: программа сама считает перцентили</h2>
+
+<p>При <span class="term">summary</span> программа сама считает перцентили и отдаёт готовые числа. Prometheus получает их как отдельные ряды с меткой <code>quantile</code> <a class="cite" href="https://prometheus.io/docs/instrumenting/exposition_formats/">[1]</a>:</p>
+
+<pre>rpc_duration_seconds{quantile="0.5"}   0.0047
+rpc_duration_seconds{quantile="0.99"}  0.0766
+rpc_duration_seconds_sum   17560.47   ← сумма всех длительностей (counter)
+rpc_duration_seconds_count 2693       ← число запросов (counter)</pre>
+
+<p>Плюс: Prometheus ничего не считает, точность высокая. Минусы следуют из того, что перцентиль уже готов:</p>
+<ul>
+<li>Набор перцентилей выбран заранее. Если нужен p90, а программа отдаёт p50 и p99, его не получить.</li>
+<li>Перцентили разных экземпляров программы нельзя сложить или усреднить. Документация Prometheus: «aggregating the precomputed quantiles from a summary rarely makes sense» <a class="cite" href="https://prometheus.io/docs/practices/histograms/">[2]</a>. Вы видели это в уроке 1.</li>
+<li>За какой период посчитан перцентиль, решает программа, а не ваш запрос.</li>
+</ul>
+
+<h2>Histogram: программа только раскладывает по корзинам</h2>
+
+<p>При <span class="term">histogram</span> программа заранее задаёт границы, например 2, 4, 8 мс. Каждый запрос увеличивает счётчики всех корзин, в которые он помещается. Корзина <code>le="4"</code> (le значит «less or equal», «не больше») считает все запросы не длиннее 4 мс. Поэтому корзины накопительные: каждая включает все предыдущие <a class="cite" href="https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile">[3]</a>.</p>
+
+<pre>http_request_duration_ms_bucket{le="2"}    1
+http_request_duration_ms_bucket{le="4"}    5
+http_request_duration_ms_bucket{le="8"}    9
+http_request_duration_ms_bucket{le="+Inf"} 10   ← все запросы
+http_request_duration_ms_sum   43.3
+http_request_duration_ms_count 10</pre>
+
+<p>Это ваши десять запросов из урока 4, разложенные по корзинам. Каждая строка это обычный counter. Значит, к ней работает всё из урока 3: <code>rate()</code>, <code>increase()</code>, сумма по экземплярам.</p>
+
+<h3>Как из корзин получить перцентиль</h3>
+
+<p>Prometheus считает перцентиль функцией <code>histogram_quantile()</code> на своей стороне. Сырых значений у него нет, поэтому он предполагает, что внутри корзины запросы распределены равномерно, и интерполирует линейно <a class="cite" href="https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile">[3]</a>. Пример для p90:</p>
+
+<ol class="steps">
+<li>Ранг: 0,90 × 10 запросов = 9. Нужен девятый по скорости запрос.</li>
+<li>Ищем первую корзину, где накоплено не меньше 9: это <code>le="8"</code>. До неё (корзина <code>le="4"</code>) было 5 запросов.</li>
+<li>Внутри корзины от 4 до 8 мс лежат 9 − 5 = 4 запроса. Нам нужен 4-й из этих 4.</li>
+<li>Оценка: 4 + (8 − 4) × 4/4 = <b>8 мс</b>.</li>
+</ol>
+
+<p>Точный ответ из урока 4 был 6,13 мс. Оценка грубая, потому что корзина широкая. Попробуйте более частые границы:</p>
+
+<div class="widget" id="w-hist">
+<p class="hint">Выберите границы корзин. Сравните оценку Prometheus с точным значением k6.</p>
+<svg id="hist-svg"></svg>
+<div class="controls">
+  <label>границы
+    <select id="h-b">
+      <option value="2,4,8">2, 4, 8 мс (редкие)</option>
+      <option value="1,2,3,4,5,6,7,8,10">1, 2, 3 … 8, 10 мс (частые)</option>
+      <option value="5,10,25,50,100">5, 10, 25, 50, 100 мс (типичные для веба)</option>
+    </select>
+  </label>
+  <label>перцентиль <input type="range" id="h-p" min="10" max="99" value="90"> p<b id="h-p-v"></b></label>
+</div>
+<div class="readout" id="hist-out"></div>
+</div>
+
+<p>Главный плюс histogram в том, что корзины это counter. <code>histogram_quantile(0.95, sum(rate(x_bucket[1m])) by (le))</code> даёт p95 только по запросам за последнюю минуту и сразу по всем экземплярам. Окно выбираете вы в момент запроса.</p>
+
+<h2>Сравнение</h2>
+
+<table>
+<tr><th></th><th>Summary</th><th>Histogram</th></tr>
+<tr><td>Где считается перцентиль</td><td>в программе</td><td>в Prometheus, функцией <code>histogram_quantile()</code></td></tr>
+<tr><td>Точность</td><td>высокая</td><td>зависит от границ корзин</td></tr>
+<tr><td>Можно ли сложить экземпляры</td><td>нет</td><td>да, корзины это counter</td></tr>
+<tr><td>Окно времени</td><td>решает программа</td><td>решает ваш запрос: <code>rate(...[1m])</code></td></tr>
+<tr><td>Можно ли выбрать другой перцентиль потом</td><td>нет</td><td>да, любой</td></tr>
+</table>
+
+<p class="sidenote">У обоих типов есть <code>_sum</code> и <code>_count</code>. Среднее за окно: <code>rate(x_sum[1m]) / rate(x_count[1m])</code>.</p>
+
+<h2>А что делает k6 в вашем стеке</h2>
+
+<p>k6 при remote write по умолчанию работает как summary: сам считает перцентили и отправляет готовые числа (<code>K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max</code>). Но есть деталь, которую видно только в исходном коде: k6 считает их по всем запросам с начала теста. Хранилище значений создаётся один раз на ряд и никогда не очищается <a class="cite" href="https://github.com/grafana/k6/blob/master/internal/output/prometheusrw/remotewrite/remotewrite.go">[4]</a>.</p>
+
+<p>Вот что это значит на вашем прогоне <code>stairs-20261119-232753</code>. Я посчитал оба варианта по сырому CSV k6 (140 166 запросов) формулой k6:</p>
+
+<div class="widget" id="w-cum">
+<p class="hint">Красная линия: p95 по запросам последних 20 секунд. Синяя: p95 по всем запросам с начала теста. Синюю видит Grafana.</p>
+<svg id="cum-svg"></svg>
+<div class="controls"><label>момент <input type="range" id="c-t" min="0" max="25" value="17"> <b id="c-t-v"></b> с</label></div>
+<div class="readout" id="cum-out"></div>
+</div>
+
+<p>Два следствия для вашей миссии:</p>
+<ul>
+<li>Когда сайт начинает тормозить (около 300 с), синяя линия отстаёт: все ранние быстрые запросы «разбавляют» её. Момент поломки на дашборде выглядит позже и мягче, чем был.</li>
+<li>Когда нагрузка спала (после 400 с), запросы снова быстрые, но синяя линия остаётся около 4,4 секунды до конца теста.</li>
+</ul>
+
+<p>В репозитории уже есть обходной путь: <code>scripts/loadtest/k6-timeseries.ts</code> считает точные перцентили по окнам из сырого CSV. Ещё один путь: опция <code>K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true</code> отправляет histogram вместо готовых чисел <a class="cite" href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">[5]</a>. Тогда окно задаёт <code>rate()</code>. Это нативная гистограмма Prometheus, и её поддержку на сервере нужно проверить отдельно.</p>
+
+<h2>Проверьте себя</h2>
+<p class="score"></p>
+
+<div class="quiz" data-answer="2">
+<div class="q">1. Корзины: <code>le="10"</code> = 40, <code>le="20"</code> = 90, <code>le="+Inf"</code> = 100. Какую оценку p50 даст <code>histogram_quantile</code>?</div>
+<button class="opt">10 мс, нижняя граница корзины</button>
+<button class="opt">15 мс, середина корзины</button>
+<button class="opt">12 мс, интерполяция в корзине</button>
+<button class="opt">20 мс, верхняя граница корзины</button>
+<div class="fb">Ранг 0,5 × 100 = 50. Корзина 10–20 мс, до неё 40, в ней 50. Нужен 10-й из 50: 10 + 10 × 10/50 = 12.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+<div class="q">2. У вас три экземпляра app. Какой тип позволит честно посчитать общий p95?</div>
+<button class="opt">Histogram: корзины можно сложить</button>
+<button class="opt">Summary: перцентиль уже готовый</button>
+<button class="opt">Gauge: последнее значение точнее</button>
+<button class="opt">Любой: Prometheus сам усреднит</button>
+<div class="fb">Сумма корзин трёх экземпляров это корзины общего потока. Готовые перцентили сложить нельзя.</div>
+</div>
+
+<div class="quiz" data-answer="3">
+<div class="q">3. Почему p95 в дашборде k6 почти не падает после снятия нагрузки?</div>
+<button class="opt">Prometheus хранит только максимальные значения</button>
+<button class="opt">Grafana усредняет точки за последние 5 минут</button>
+<button class="opt">Сервер всё ещё отвечает медленно после пика</button>
+<button class="opt">k6 считает p95 по всем запросам с начала теста</button>
+<div class="fb">Накопительный p95 включает тысячи медленных запросов с пика. Новые быстрые запросы почти не сдвигают его.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+<div class="q">4. Что даёт <code>rate(x_sum[1m]) / rate(x_count[1m])</code> для histogram длительности?</div>
+<button class="opt">p50 запросов за последнюю минуту</button>
+<button class="opt">Среднюю длительность за минуту</button>
+<button class="opt">Число запросов в секунду за минуту</button>
+<button class="opt">Долю медленных запросов за минуту</button>
+<div class="fb">Сумма длительностей, делённая на число запросов, это среднее. rate делает оба числа «за последнюю минуту».</div>
+</div>
+
+<div class="callout ask">
+<strong>Вопросы на понимание. Ответьте своими словами в чате.</strong>
+<ol>
+<li>Вы выбираете границы корзин для <code>GET /</code>. Обычно ответ 2–10 мс, при перегрузке до 8 секунд. Какие границы вы бы взяли и почему?</li>
+<li>Почему <code>k6_http_req_duration_max</code> в вашем Prometheus ни разу не уменьшился за прогон? Объясните через то, что вы узнали в этом уроке.</li>
+</ol>
+</div>
+
+<h2>Что читать</h2>
+<p>Главный источник: <a href="https://prometheus.io/docs/practices/histograms/">Prometheus: Histograms and summaries</a>. Это та же тема на одной странице, с таблицей сравнения и разбором ошибок выбора границ.</p>
+
+<h3>Источники</h3>
+<ol class="meta">
+<li><a href="https://prometheus.io/docs/instrumenting/exposition_formats/">prometheus.io: Exposition formats</a></li>
+<li><a href="https://prometheus.io/docs/practices/histograms/">prometheus.io: Histograms and summaries</a></li>
+<li><a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile">prometheus.io: histogram_quantile()</a></li>
+<li><a href="https://github.com/grafana/k6/blob/master/internal/output/prometheusrw/remotewrite/remotewrite.go">k6 source: remotewrite.go</a></li>
+<li><a href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">Grafana k6: Prometheus remote write</a></li>
+</ol>
+
+<p class="sidenote">Что-то непонятно? Спросите меня в чате. Я ваш преподаватель.</p>
+
+<div class="lessons-nav"><a href="0004-percentile.html">← Урок 4: перцентиль</a><a href="0001-prometheus-metrics-from-first-principles.html">Урок 1: обзор стека, теперь с основой →</a></div>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/viz.js"></script>
+<script>
+(function () {
+  const vals = [1.8, 2.5, 2.7, 3.6, 5.9, 4.2, 5.6, 8.2, 4.9, 3.9];
+
+  // Prometheus classic histogram_quantile: rank = q * count, linear inside the bucket, lower edge 0 for the first bucket.
+  function hq(q, bounds, cum) {
+    const total = cum.at(-1); const rank = q * total;
+    let b = cum.findIndex((c) => c >= rank);
+    if (b === bounds.length) return { v: bounds.at(-1), b, rank, inf: true };
+    const lo = b === 0 ? 0 : bounds[b - 1], hi = bounds[b];
+    const below = b === 0 ? 0 : cum[b - 1], inB = cum[b] - below;
+    return { v: lo + (hi - lo) * ((rank - below) / inB), b, rank, lo, hi, below, inB };
+  }
+
+  function drawHist() {
+    const bounds = document.getElementById('h-b').value.split(',').map(Number);
+    const p = +document.getElementById('h-p').value;
+    document.getElementById('h-p-v').textContent = p;
+    const cum = bounds.map((b) => vals.filter((v) => v <= b).length).concat([vals.length]);
+    const s = Viz.svg('#hist-svg', 720, 200);
+    const top = Math.max(10, bounds.at(-1));
+    const X = Viz.scale(0, top * 1.08, 40, 700);
+    const Y = Viz.scale(0, 10, 150, 20);
+    Viz.hline(s, 150, 40, 700);
+    // Non-cumulative bars per bucket for intuition.
+    bounds.forEach((b, i) => {
+      const lo = i === 0 ? 0 : bounds[i - 1];
+      const n = cum[i] - (i === 0 ? 0 : cum[i - 1]);
+      Viz.rect(s, X(lo) + 1, Y(n), X(b) - X(lo) - 2, 150 - Y(n), { color: '#dbe6f3' });
+      if (n) Viz.text(s, (X(lo) + X(b)) / 2, Y(n) - 4, String(n), { anchor: 'middle', color: '#2f6db3' });
+      Viz.text(s, X(b), 166, String(b), { anchor: 'middle', size: 11 });
+    });
+    Viz.text(s, 40, 166, '0', { anchor: 'middle', size: 11 });
+    vals.forEach((v) => Viz.rect(s, X(Math.min(v, top)), 152, 1.5, 6, { color: '#a4442a' }));
+    const est = hq(p / 100, bounds, cum);
+    const exact = Viz.k6Percentile(vals, p / 100).value;
+    Viz.vline(s, X(exact), 20, 150, { color: '#1d1d1f', dash: '3 3' });
+    Viz.text(s, X(exact) + 4, 30, 'точно ' + Viz.fmt(exact, 2), { color: '#1d1d1f', size: 11 });
+    Viz.vline(s, X(est.v), 20, 150, { color: '#a4442a', width: 2 });
+    Viz.text(s, X(est.v) + 4, 46, 'оценка ' + Viz.fmt(est.v, 2), { color: '#a4442a', size: 11, weight: 600 });
+    Viz.text(s, 40, 192, 'синие столбики: сколько запросов попало в каждую корзину · красные отметки: сами запросы', { size: 11 });
+    const lines = bounds.map((b, i) => `le="${b}"`.padEnd(10) + ` ${cum[i]}`).concat([`le="+Inf"  ${cum.at(-1)}`]).join('\n');
+    let txt = `корзины (накопительные):\n${lines}\n\nранг = ${Viz.fmt(p / 100, 2)} × 10 = ${Viz.fmt(est.rank, 1)}\n`;
+    txt += est.inf
+      ? `ранг попал в +Inf → Prometheus возвращает верхнюю границу предпоследней корзины: ${bounds.at(-1)}`
+      : `корзина ${est.lo}–${est.hi} мс, до неё ${est.below}, в ней ${est.inB}\nоценка = ${est.lo} + (${est.hi} − ${est.lo}) × (${Viz.fmt(est.rank, 1)} − ${est.below}) / ${est.inB} = ${Viz.fmt(est.v, 2)} мс`;
+    txt += `\nточно по формуле k6: ${Viz.fmt(exact, 2)} мс · ошибка ${Viz.fmt(Math.abs(est.v - exact), 2)} мс`;
+    document.getElementById('hist-out').textContent = txt;
+  }
+  ['h-b', 'h-p'].forEach((id) => document.getElementById(id).addEventListener('input', drawHist));
+  drawHist();
+
+  // From loadtest/results/stairs-20261119-232753/k6.csv.gz: [t, requests in window, window p95 ms, cumulative p95 ms].
+  const D = [[0,1409,17,17],[20,2000,49,25],[40,2000,43,31],[60,2064,8,23],[80,3631,9,20],[100,4000,7,18],[120,3999,25,20],[140,4558,263,61],[160,7831,63,62],[180,7994,62,62],[200,8006,17,54],[220,8694,21,50],[240,9996,275,73],[260,9977,322,88],[280,10020,166,95],[300,11143,471,125],[320,10372,3820,1147],[340,10530,6300,2957],[360,9982,8192,4283],[380,5216,6689,4478],[400,1600,6,4456],[420,1600,12,4434],[440,1548,12,4406],[460,1146,5,4392],[480,680,19,4385],[500,170,9,4382]];
+  function drawCum() {
+    const k = +document.getElementById('c-t').value;
+    const s = Viz.svg('#cum-svg', 720, 300);
+    const X = Viz.scale(0, 510, 60, 700);
+    const L = (v) => 250 - (Math.log10(v) / Math.log10(10000)) * 220;
+    [1, 10, 100, 1000, 10000].forEach((v) => { Viz.hline(s, L(v), 60, 700, { color: '#eee' }); Viz.text(s, 54, L(v) + 4, v >= 1000 ? v / 1000 + ' с' : v + ' мс', { anchor: 'end', size: 11 }); });
+    // Request volume as grey bars in the back.
+    const maxN = Math.max(...D.map((d) => d[1]));
+    D.forEach((d) => Viz.rect(s, X(d[0]) + 1, 250 - (d[1] / maxN) * 60, X(20) - X(0) - 2, (d[1] / maxN) * 60, { color: '#efece4' }));
+    Viz.line(s, D.map((d) => [X(d[0] + 10), L(d[2])]), { color: '#a4442a', width: 2.2 });
+    Viz.line(s, D.map((d) => [X(d[0] + 10), L(d[3])]), { color: '#2f6db3', width: 2.2 });
+    for (let t = 0; t <= 500; t += 100) Viz.text(s, X(t), 268, t + ' с', { anchor: 'middle', size: 11 });
+    const d = D[k];
+    Viz.vline(s, X(d[0] + 10), 20, 250, { color: '#1d1d1f', dash: '3 3' });
+    Viz.dot(s, X(d[0] + 10), L(d[2]), { color: '#a4442a' });
+    Viz.dot(s, X(d[0] + 10), L(d[3]), { color: '#2f6db3' });
+    Viz.text(s, 60, 290, 'серые столбики: число запросов в окне · шкала времени ответа сжата (каждая линия ×10)', { size: 11 });
+    document.getElementById('c-t-v').textContent = d[0] + '–' + (d[0] + 20);
+    const lag = d[2] / d[3];
+    document.getElementById('cum-out').textContent =
+      `окно ${d[0]}–${d[0] + 20} с, запросов в окне: ${d[1]}\n` +
+      `p95 последних 20 с:   ${d[2]} мс\n` +
+      `p95 с начала теста:   ${d[3]} мс  ← это видит Grafana\n` +
+      (lag > 1.5 ? `Grafana показывает в ${Viz.fmt(lag, 1)} раза меньше, чем есть сейчас.` : lag < 0.67 ? `Grafana показывает в ${Viz.fmt(1 / lag, 0)} раз больше, чем есть сейчас.` : 'Здесь оба числа близки.');
+  }
+  document.getElementById('c-t').addEventListener('input', drawCum);
+  drawCum();
+})();
+</script>
+</body>
+</html>

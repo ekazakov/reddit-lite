@@ -117,11 +117,12 @@ const SERIES: { name: string; unit: string; expr: string }[] = [
   { name: 'k6_http_rps', unit: 'requests/s', expr: `sum(rate(k6_http_reqs_total{${T}}[30s]))` },
   // Busy VUs. A value at MAX_VUS means k6 is out of VUs and drops iterations.
   { name: 'k6_vus', unit: 'VUs', expr: `sum(k6_vus{${T}})` },
-  // The worst p95 over all actions in each 5 s push window, in ms (k6 sends seconds).
+  // The worst p95 over all actions, in ms (k6 sends seconds). k6 computes it over all requests since the run started,
+  // not over the last 5 s push: its trend sink is never reset. So it lags a rise in latency and stays high after a peak.
   { name: 'k6_p95_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p95{${T}}) * 1000` },
-  // The worst p50 over all actions in each 5 s push window, in ms. The report draws it for runs without a k6 CSV.
+  // The worst p50 over all actions since the run started, in ms. The report draws it for runs without a k6 CSV.
   { name: 'k6_p50_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p50{${T}}) * 1000` },
-  // The worst p99 over all actions in each 5 s push window, in ms.
+  // The worst p99 over all actions since the run started, in ms.
   { name: 'k6_p99_ms_worst', unit: 'ms', expr: `max(k6_http_req_duration_p99{${T}}) * 1000` },
   // The p95 for each action, in ms. It shows which page gets slow first.
   { name: 'k6_p95_ms_by_action', unit: 'ms', expr: `max by (action) (k6_http_req_duration_p95{${T}}) * 1000` },
@@ -355,7 +356,7 @@ async function main() {
     // Notes that explain how to read the file.
     notes: [
       // Explain why the p95 numbers here differ from the k6 summary.
-      'k6 p95 values here are per 5 s push window. Use the k6 summary JSON for the true whole-run percentiles.',
+      'k6 percentiles here are cumulative: each point covers all requests from the run start to that time, not the last 5 s. Use timeseries.json from the k6 CSV for percentiles per time window.',
       // Explain the connection counts.
       'pg_connections counts every client of reddit_lite, including the exporter and any IDE connection.',
       // Explain the timeline offsets.

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Справочник: метрики Prometheus в load test стеке reddit-lite</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>body{max-width:980px} td:nth-child(2){white-space:nowrap}</style>
+</head>
+<body>
+<nav class="course"><a href="../lessons/0001-prometheus-metrics-from-first-principles.html">Урок 1</a></nav>
+
+<h1>Справочник метрик</h1>
+<p class="lede">Все метрики, которые используют дашборды Grafana и <code>scripts/loadtest/prom-summary.ts</code>. Для каждой: тип, единица, метки, сигнал и правильный запрос.</p>
+
+<h2>Шпаргалка по типам</h2>
+<table>
+<tr><th>Признак в имени</th><th>Тип</th><th>Как читать</th><th>Агрегация</th></tr>
+<tr><td><code>_total</code>, большинство <code>pg_stat_database_*</code></td><td><span class="tag counter">counter</span></td><td><code>rate(x[30s])</code> для скорости, <code>increase(x[R])</code> для итога</td><td><code>sum</code></td></tr>
+<tr><td><code>_bytes</code> без total, <code>_count</code>, <code>k6_vus</code>, <code>_rate</code> у k6</td><td><span class="tag gauge">gauge</span></td><td>как есть</td><td><code>sum</code>, <code>avg</code>, <code>max</code> по смыслу</td></tr>
+<tr><td><code>k6_*_p50/p95/p99/max</code></td><td><span class="tag pre">готовая статистика</span></td><td>как есть. k6 считает по всем запросам с начала теста и отправляет раз в 5 с. Это не окно, а накопленное значение</td><td>только <code>max</code></td></tr>
+</table>
+
+<h2>k6: нагрузка и опыт пользователя (push)</h2>
+<table>
+<tr><th>Метрика</th><th>Тип</th><th>Единица</th><th>Что значит</th><th>Сигнал</th><th>Запрос в стеке</th></tr>
+<tr><td><code>k6_http_reqs_total</code></td><td><span class="tag counter">counter</span></td><td>запросы</td><td>HTTP запросы, которые k6 отправил и получил ответ. Метки: <code>action</code>, <code>status</code>, <code>method</code>, <code>name</code>, <code>scenario</code>, <code>testid</code></td><td>traffic</td><td><code>sum by (action) (rate(…[30s]))</code></td></tr>
+<tr><td><code>k6_iterations_total</code></td><td><span class="tag counter">counter</span></td><td>итерации</td><td>Завершённые итерации сценария. Одна итерация это одно действие бота</td><td>traffic</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>k6_dropped_iterations_total</code></td><td><span class="tag counter">counter</span></td><td>итерации</td><td>Итерации, которые k6 не начал: все VU заняты. Растёт, когда сервер отвечает медленнее, чем приходят новые итерации</td><td>errors</td><td><code>sum(rate(…[30s])) or vector(0)</code></td></tr>
+<tr><td><code>k6_vus</code></td><td><span class="tag gauge">gauge</span></td><td>VU</td><td>Активные виртуальные пользователи. Значение у MAX_VUS значит, что k6 исчерпал VU</td><td>saturation (генератора)</td><td><code>sum(k6_vus)</code></td></tr>
+<tr><td><code>k6_vus_max</code></td><td><span class="tag gauge">gauge</span></td><td>VU</td><td>Сколько VU выделено</td><td>—</td><td>не используется</td></tr>
+<tr><td><code>k6_http_req_duration_p50/p95/p99/max</code></td><td><span class="tag pre">статистика</span></td><td>секунды</td><td>Полное время запроса: отправка + ожидание + получение. Без DNS и соединения</td><td>latency</td><td><code>max by (action) (…_p95) * 1000</code> → мс</td></tr>
+<tr><td><code>k6_http_req_waiting_*</code></td><td><span class="tag pre">статистика</span></td><td>секунды</td><td>Время до первого байта ответа (TTFB). Почти всё это работа сервера</td><td>latency</td><td>не используется</td></tr>
+<tr><td><code>k6_http_req_blocked_*</code>, <code>_connecting_*</code>, <code>_tls_handshaking_*</code>, <code>_sending_*</code>, <code>_receiving_*</code></td><td><span class="tag pre">статистика</span></td><td>секунды</td><td>Фазы запроса: ожидание свободного сокета, TCP, TLS, отправка, получение</td><td>latency</td><td>не используется</td></tr>
+<tr><td><code>k6_iteration_duration_*</code></td><td><span class="tag pre">статистика</span></td><td>секунды</td><td>Длительность одной итерации целиком</td><td>latency</td><td>не используется</td></tr>
+<tr><td><code>k6_http_req_failed_rate</code></td><td><span class="tag gauge">gauge</span></td><td>доля 0–1</td><td>Доля неудачных запросов: таймауты и неожиданные статусы</td><td>errors</td><td><code>avg(…)</code></td></tr>
+<tr><td><code>k6_checks_rate</code></td><td><span class="tag gauge">gauge</span></td><td>доля 0–1</td><td>Доля пройденных <code>check()</code> в сценарии</td><td>errors</td><td><code>1 - avg(…)</code> → доля провалов</td></tr>
+<tr><td><code>k6_data_sent_total</code>, <code>k6_data_received_total</code></td><td><span class="tag counter">counter</span></td><td>байты</td><td>Сетевой трафик генератора</td><td>traffic</td><td>не используется</td></tr>
+</table>
+
+<h2>postgres-exporter: база данных (pull, :9187)</h2>
+<table>
+<tr><th>Метрика</th><th>Тип</th><th>Единица</th><th>Что значит</th><th>Сигнал</th><th>Запрос в стеке</th></tr>
+<tr><td><code>pg_stat_database_xact_commit</code></td><td><span class="tag counter">counter</span></td><td>транзакции</td><td>Подтверждённые транзакции. Метка <code>datname</code></td><td>traffic</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_xact_rollback</code></td><td><span class="tag counter">counter</span></td><td>транзакции</td><td>Откаты. Рост часто означает ошибки или таймауты блокировок</td><td>errors</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_deadlocks</code></td><td><span class="tag counter">counter</span></td><td>случаи</td><td>Найденные взаимные блокировки</td><td>errors</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_tup_returned</code></td><td><span class="tag counter">counter</span></td><td>строки</td><td>Строки, которые прочитали сканы, включая отброшенные фильтром. Много на один запрос = полные сканы</td><td>traffic</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_tup_fetched</code></td><td><span class="tag counter">counter</span></td><td>строки</td><td>Живые строки, которые достали по индексу</td><td>traffic</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_tup_inserted</code>, <code>_tup_updated</code></td><td><span class="tag counter">counter</span></td><td>строки</td><td>Вставленные и изменённые строки: посты, голоса, комментарии</td><td>traffic</td><td><code>sum(rate(…[30s]))</code></td></tr>
+<tr><td><code>pg_stat_database_blks_hit</code></td><td><span class="tag counter">counter</span></td><td>блоки 8 КБ</td><td>Блок нашёлся в shared_buffers</td><td>saturation (кэш)</td><td>доля: <code>hit / (hit + read)</code> через <code>rate(…[1m])</code></td></tr>
+<tr><td><code>pg_stat_database_blks_read</code></td><td><span class="tag counter">counter</span></td><td>блоки 8 КБ</td><td>Блок читали вне кэша Postgres (может прийти из кэша ОС)</td><td>saturation (кэш)</td><td>см. строку выше</td></tr>
+<tr><td><code>pg_stat_database_temp_bytes</code>, <code>_temp_files</code></td><td><span class="tag counter">counter</span></td><td>байты, файлы</td><td>Сортировки и хэши, которые не влезли в work_mem и ушли на диск</td><td>saturation (память)</td><td><code>sum(rate(…[1m]))</code></td></tr>
+<tr><td><code>pg_stat_database_active_time_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>время</td><td>Время выполнения SQL. Скорость роста ≈ среднее число занятых процессов Postgres</td><td>saturation</td><td><code>sum(rate(…[30s])) / 1000</code></td></tr>
+<tr><td><code>pg_stat_activity_count</code></td><td><span class="tag gauge">gauge</span></td><td>соединения</td><td>Соединения по метке <code>state</code>: active, idle, idle in transaction. Active у размера пула (10) = запросы ждут пул</td><td>saturation</td><td><code>sum by (state) (…)</code></td></tr>
+<tr><td><code>pg_stat_activity_max_tx_duration</code></td><td><span class="tag gauge">gauge</span></td><td>секунды</td><td>Самая долгая открытая транзакция. Ловит зависшие транзакции</td><td>latency</td><td><code>max(…{backend_type="client backend",state!="idle"})</code></td></tr>
+<tr><td><code>pg_locks_count</code></td><td><span class="tag gauge">gauge</span></td><td>блокировки</td><td>Удерживаемые блокировки по метке <code>mode</code></td><td>saturation</td><td><code>sum by (mode) (…)</code></td></tr>
+<tr><td><code>pg_stat_statements_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>секунды</td><td>Суммарное время выполнения одного вида запроса. Метка <code>queryid</code></td><td>latency</td><td><code>topk(15, sum by (queryid) (increase(…[R])))</code></td></tr>
+<tr><td><code>pg_stat_statements_calls_total</code></td><td><span class="tag counter">counter</span></td><td>вызовы</td><td>Сколько раз выполнили запрос. seconds / calls = среднее время</td><td>traffic</td><td><code>sum by (queryid) (increase(…[R]))</code></td></tr>
+<tr><td><code>pg_stat_statements_rows_total</code></td><td><span class="tag counter">counter</span></td><td>строки</td><td>Строки, которые вернул или изменил запрос</td><td>traffic</td><td><code>sum by (queryid) (increase(…[R]))</code></td></tr>
+<tr><td><code>pg_settings_*</code> (288 шт.)</td><td><span class="tag gauge">gauge</span></td><td>разные</td><td>Значения настроек Postgres. Это конфигурация, а не нагрузка</td><td>—</td><td>не используется</td></tr>
+</table>
+
+<h2>cAdvisor: контейнеры app и db (pull, :8080)</h2>
+<p class="meta">Метка <code>id</code> равна <code>/loadtest-app</code> или <code>/loadtest-db</code>: так задаёт <code>cgroup_parent</code> в compose. Дашборд переименовывает её в <code>service</code> через <code>label_replace</code>.</p>
+<table>
+<tr><th>Метрика</th><th>Тип</th><th>Единица</th><th>Что значит</th><th>Сигнал</th><th>Запрос в стеке</th></tr>
+<tr><td><code>container_cpu_usage_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>секунды CPU</td><td>Накопленное процессорное время. rate = число занятых ядер</td><td>saturation</td><td><code>rate(…[30s])</code></td></tr>
+<tr><td><code>container_pressure_cpu_waiting_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>секунды</td><td>PSI «some»: время, когда хотя бы одна задача ждала CPU. rate = доля 0–1</td><td>saturation</td><td><code>rate(…[30s])</code></td></tr>
+<tr><td><code>container_pressure_io_waiting_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>секунды</td><td>PSI «some» для диска</td><td>saturation</td><td><code>rate(…[30s])</code></td></tr>
+<tr><td><code>container_pressure_*_stalled_seconds_total</code></td><td><span class="tag counter">counter</span></td><td>секунды</td><td>PSI «full»: стояли все задачи одновременно</td><td>saturation</td><td>не используется</td></tr>
+<tr><td><code>container_memory_working_set_bytes</code></td><td><span class="tag gauge">gauge</span></td><td>байты</td><td>Память, которую ядро считает против лимита. Её рост к лимиту ведёт к OOM</td><td>saturation</td><td>как есть, <code>/ 1048576</code> → МиБ</td></tr>
+<tr><td><code>container_memory_rss</code></td><td><span class="tag gauge">gauge</span></td><td>байты</td><td>Анонимная память процесса без файлового кэша</td><td>saturation</td><td>как есть</td></tr>
+<tr><td><code>container_spec_memory_limit_bytes</code></td><td><span class="tag gauge">gauge</span></td><td>байты</td><td>Лимит памяти контейнера</td><td>—</td><td>не используется</td></tr>
+<tr><td><code>container_oom_events_total</code></td><td><span class="tag counter">counter</span></td><td>события</td><td>Убийства процессов из-за нехватки памяти</td><td>errors</td><td>не используется</td></tr>
+</table>
+
+<h2>Служебные</h2>
+<table>
+<tr><th>Метрика</th><th>Тип</th><th>Что значит</th></tr>
+<tr><td><code>up</code></td><td><span class="tag gauge">gauge</span></td><td>1, если последний скрейп источника прошёл. Prometheus пишет её сам для каждого target. Для k6 её нет: k6 не скрейпят</td></tr>
+<tr><td><code>scrape_duration_seconds</code>, <code>scrape_samples_scraped</code>, <code>scrape_series_added</code></td><td><span class="tag gauge">gauge</span></td><td>Сколько длился скрейп и сколько точек он принёс</td></tr>
+<tr><td><code>go_*</code>, <code>process_*</code></td><td>разные</td><td>Внутренности самих экспортеров на Go. Для анализа reddit-lite не нужны</td></tr>
+</table>
+
+<p class="meta">Данные сняты 2026-11-26 с локального Prometheus (<code>/api/v1/label/__name__/values</code>, <code>/api/v1/metadata</code>). Источники: <a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus metric types</a>, <a href="https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-remote-write/">k6 remote write</a>, <a href="https://www.postgresql.org/docs/current/monitoring-stats.html">PostgreSQL statistics</a>, <a href="https://docs.kernel.org/accounting/psi.html">Linux PSI</a>.</p>
+</body>
+</html>
